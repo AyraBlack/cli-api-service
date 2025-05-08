@@ -1,11 +1,11 @@
 // server.js
 const express = require('express');
 const { spawn } = require('child_process');
+const path = require('path');
 const app = express();
 
 const YTDLP_BIN = '/usr/local/bin/yt-dlp';
-
-// where Puppeteer stored Chromium’s profile
+// Puppeteer’s Chromium profile dir (from your Docker ENV)
 const CHROME_USER_DATA_DIR = process.env.CHROME_USER_DATA_DIR || '/home/node/chromium-profile';
 
 app.use((req, res, next) => {
@@ -34,24 +34,38 @@ app.get('/download', (req, res) => {
   console.log('[DOWNLOAD] URL:', url);
   if (!url) return res.status(400).send('Missing ?url=');
 
-  // always let yt-dlp handle everything (it will fallback to plain HTTP if it sees an mp4 URL)
+  // ─── RAW‐FILE FALLBACK ───────────────────────────────────────────────────────
+  if (/\.(mp4|m4a|mov|avi|mkv)(\?.*)?$/i.test(url)) {
+    console.log('[DOWNLOAD] direct HTTP fetch for file:', url);
+    // use the original filename (before any querystring) for Content‐Disposition
+    const fname = path.basename(url.split('?')[0]);
+    res.setHeader('Content-Disposition', `attachment; filename="${fname}"`);
+    const curl = spawn('curl', ['-L', url], { stdio: ['ignore','pipe','pipe'] });
+    curl.stdout.pipe(res);
+    curl.stderr.on('data', d => console.error('[curl stderr]', d.toString()));
+    curl.on('error', e => {
+      console.error('[curl error]', e);
+      if (!res.headersSent) res.status(500).send('curl failed');
+    });
+    return;
+  }
+
+  // ─── ALL ELSE → yt-dlp + ffmpeg ─────────────────────────────────────────────
   const format = req.query.format || 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4';
   res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
 
   const args = [
-    // ask yt-dlp to pull cookies from the Chromium profile we just logged in
+    // pull your logged-in cookies from the Puppeteer Chromium profile
     '--cookies-from-browser', `chromium:${CHROME_USER_DATA_DIR}`,
-
-    //--verbose, // uncomment if you want extra debugging from yt-dlp
 
     '--add-header',
       'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-     + 'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+    + 'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
 
     '-f', format,
     '--external-downloader', 'ffmpeg',
     '--external-downloader-args', '-c:v libx264 -c:a aac -movflags +faststart',
-    '-o', '-', // stream to stdout
+    '-o','-',  // stream to stdout
     url
   ];
 
