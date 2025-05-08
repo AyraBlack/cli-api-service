@@ -3,7 +3,7 @@ const express = require('express');
 const { spawn } = require('child_process');
 const app = express();
 
-// ADD THESE TWO LINES AT THE TOP
+// Ensure these are at the top
 const fs = require('fs');
 const path = require('path');
 
@@ -19,33 +19,37 @@ app.get('/health', (_req, res) => {
   res.status(200).send('OK');
 });
 
-// ++++++++++++++++ ADD THIS TEMPORARY ENDPOINT FOR THE SCREENSHOT ++++++++++++++++
+// ++++++++++++++++ MODIFIED TEMPORARY ENDPOINT ++++++++++++++++
 app.get('/get-debug-screenshot', (req, res) => {
-  // This assumes server.js and login_post_nav_error.png are in the same directory 
-  // (e.g., /usr/src/app) when the app runs in Coolify.
-  const filePath = path.join(__dirname, 'login_post_nav_error.png');
-  console.log('[DEBUG] Attempting to send screenshot from path:', filePath);
+  const fileName = req.query.name; // Get filename from query parameter
+  if (!fileName || !fileName.endsWith('.png')) {
+    return res.status(400).send('Please provide a valid .png filename in the ?name= parameter.');
+  }
+
+  // Assumes server.js is in /usr/src/app, so screenshots are in the same directory
+  const filePath = path.join(__dirname, fileName); 
+  console.log('[DEBUG] Attempting to send screenshot:', filePath);
 
   if (fs.existsSync(filePath)) {
-    // Send the file. The browser will then download it or display it.
     res.sendFile(filePath, (err) => {
       if (err) {
         console.error('[DEBUG] Error sending screenshot:', err);
-        if (!res.headersSent) { // Check if headers were already sent
+        if (!res.headersSent) {
           res.status(500).send('Error sending screenshot file.');
         }
       } else {
-        console.log('[DEBUG] Screenshot sent successfully.');
+        console.log('[DEBUG] Screenshot sent successfully:', fileName);
       }
     });
   } else {
-    console.log('[DEBUG] Screenshot not found at path:', filePath);
-    res.status(404).send('Screenshot file not found. Make sure login.js has run and created it.');
+    console.log('[DEBUG] Screenshot NOT FOUND at path:', filePath);
+    res.status(404).send(`Screenshot file '${fileName}' not found.`);
   }
 });
-// +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+// +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 app.get('/yt-dlp-version', (_req, res) => {
+  // ... (your yt-dlp-version code) ...
   const child = spawn(YTDLP_BIN, ['--version'], { stdio: ['ignore','pipe','pipe'] });
   let out = '';
   child.stdout.on('data', c => out += c);
@@ -57,6 +61,7 @@ app.get('/yt-dlp-version', (_req, res) => {
 });
 
 app.get('/download', (req, res) => {
+  // ... (your download code) ...
   const url = req.query.url;
   console.log('[DOWNLOAD] URL:', url);
   if (!url) return res.status(400).send('Missing ?url=');
@@ -65,7 +70,7 @@ app.get('/download', (req, res) => {
   res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
 
   const args = [
-    '--cookies', '/usr/src/app/cookies.txt', // Using absolute path
+    '--cookies', '/usr/src/app/cookies.txt',
     '-f', format,
     '--add-header',
       'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
