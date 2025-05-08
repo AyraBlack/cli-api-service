@@ -2,16 +2,15 @@
 
 const puppeteer = require('puppeteer');
 
-// Path to Chromium's profile, set via Docker ENV
-const CHROME_USER_DATA_DIR = process.env.CHROME_USER_DATA_DIR;
-const YOUTUBE_URL           = 'https://www.youtube.com';
-const GOOGLE_LOGIN_URL      = 'https://accounts.google.com/signin/v2/identifier';
+// Path to Chromium's profile, set via Docker ENV\ nconst CHROME_USER_DATA_DIR = process.env.CHROME_USER_DATA_DIR;
+const YOUTUBE_URL      = 'https://www.youtube.com';
+const GOOGLE_LOGIN_URL = 'https://accounts.google.com/signin/v2/identifier';
 
 const YOUTUBE_EMAIL    = process.env.YOUTUBE_EMAIL;
 const YOUTUBE_PASSWORD = process.env.YOUTUBE_PASSWORD;
 
 async function tryToLogInToYouTube() {
-  console.log('Login Robot: Hello! I will try to make sure Chromium is logged into YouTube.');
+  console.log('Login Robot: Hello! I will ensure Chromium is logged into YouTube.');
 
   if (!CHROME_USER_DATA_DIR) {
     console.error('Login Robot: Missing CHROME_USER_DATA_DIR. Check Docker ENV.');
@@ -21,7 +20,7 @@ async function tryToLogInToYouTube() {
 
   // If no credentials, just warm up the profile and exit.
   if (!YOUTUBE_EMAIL || !YOUTUBE_PASSWORD) {
-    console.warn('Login Robot: No YOUTUBE_EMAIL/YOUTUBE_PASSWORD set. Skipping full login flow.');
+    console.warn('Login Robot: No YOUTUBE_EMAIL/YOUTUBE_PASSWORD set. Skipping login flow.');
     return;
   }
 
@@ -40,8 +39,6 @@ async function tryToLogInToYouTube() {
     });
 
     const page = await browser.newPage();
-
-    // ** FIXED User-Agent string in one concatenated literal **
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
       'AppleWebKit/537.36 (KHTML, like Gecko) ' +
@@ -51,33 +48,38 @@ async function tryToLogInToYouTube() {
     console.log('Login Robot: Navigating to YouTube...');
     await page.goto(YOUTUBE_URL, { waitUntil: 'networkidle2' });
 
-    const avatarSel = 'ytd-topbar-menu-button-renderer yt-icon-button#button';
-    const alreadyLogged = await page.$(avatarSel);
-    if (alreadyLogged) {
-      console.log('Login Robot: Already logged in!');
+    // Check for presence of "Sign in" button to detect logged-out state
+    const signInSelector = 'ytd-button-renderer.style-scope.ytd-masthead.style-suggestive';
+    const buttons = await page.$$eval(signInSelector, els => els.map(el => el.textContent.trim()));
+    const signedOut = buttons.includes('Sign in');
+
+    if (!signedOut) {
+      console.log('Login Robot: Already signed in.');
       return;
     }
 
-    console.log('Login Robot: Not logged in. Performing login steps...');
+    console.log('Login Robot: Not signed in. Starting login flow...');
     await page.goto(GOOGLE_LOGIN_URL, { waitUntil: 'networkidle2' });
 
-    // ** Email step **
+    // Email step
     await page.waitForSelector('input[type="email"]', { timeout: 15000 });
     await page.type('input[type="email"]', YOUTUBE_EMAIL, { delay: 100 });
     await page.click('#identifierNext');
 
-    // ** Password step **
+    // Password step
     await page.waitForSelector('input[type="password"]', { visible: true, timeout: 20000 });
     await page.type('input[type="password"]', YOUTUBE_PASSWORD, { delay: 100 });
     await page.click('#passwordNext');
 
-    // ** Final check **
+    // Final check
     await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 45000 });
-    const finalCheck = await page.$(avatarSel);
-    if (finalCheck) {
-      console.log('Login Robot: Login SUCCESS!');
+    const postButtons = await page.$$eval(signInSelector, els => els.map(el => el.textContent.trim()));
+    const stillSignedOut = postButtons.includes('Sign in');
+
+    if (stillSignedOut) {
+      console.error('Login Robot: Login may have failed (still saw "Sign in").');
     } else {
-      console.error('Login Robot: Login may have failed (avatar not found).');
+      console.log('Login Robot: Login SUCCESS!');
     }
   } catch (err) {
     console.error('Login Robot: Error during login flow:', err);
@@ -88,7 +90,7 @@ async function tryToLogInToYouTube() {
 }
 
 if (require.main === module) {
-  console.log('Login Robot: Running standalone test mode…');
+  console.log('Login Robot: Running standalone test mode...');
   tryToLogInToYouTube()
     .then(() => process.exit(0))
     .catch(() => process.exit(1));
