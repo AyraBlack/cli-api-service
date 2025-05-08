@@ -1,6 +1,10 @@
-// login.js - Simplified, No-2FA, Trying unusual User Agent workaround
+// login.js - Attempting to use puppeteer-extra with stealth plugin
 
-const puppeteer = require('puppeteer');
+// Use puppeteer-extra and load stealth plugin
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+puppeteer.use(StealthPlugin()); 
+
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -8,14 +12,10 @@ const CHROME_USER_DATA_DIR = process.env.CHROME_USER_DATA_DIR;
 const YOUTUBE_URL = 'https://www.youtube.com';
 const GOOGLE_LOGIN_URL = 'https://accounts.google.com/signin/v2/identifier';
 
-const YOUTUBE_EMAIL = process.env.YOUTUBE_EMAIL;
-const YOUTUBE_PASSWORD = process.env.YOUTUBE_PASSWORD;
+const YOUTUBE_EMAIL = process.env.YOUTUBE_EMAIL; // Should be the no-2FA email
+const YOUTUBE_PASSWORD = process.env.YOUTUBE_PASSWORD; // Should be the no-2FA password
 
 const COOKIE_FILE_PATH = path.join(process.cwd(), 'cookies.txt');
-
-// Define User Agents
-const GOOGLE_LOGIN_USER_AGENT = 'https://accounts.google.com/'; // The unusual UA from GitHub issue
-const NORMAL_BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'; // A standard UA
 
 async function saveCookies(page) {
   console.log('Login Robot: Attempting to save cookies...');
@@ -37,77 +37,79 @@ async function saveCookies(page) {
     console.log(`Login Robot: Cookies saved successfully to ${COOKIE_FILE_PATH}`);
   } catch (err) {
     console.error('Login Robot: Error saving cookies:', err);
+    throw err; // Propagate error if saving fails
   }
 }
 
 async function tryToLogInToYouTube() {
-  let loginErrorOccurred = false; 
-  console.log('Login Robot: Simplified login flow starting (Trying unusual UA workaround). [DEBUG MODE: Will exit 0 even on error]');
+  console.log('Login Robot: Simplified login flow starting (using Stealth Plugin).');
+  process.exitCode = 1; // Default to error exit code
 
   if (!CHROME_USER_DATA_DIR) {
-    console.error('Login Robot: Missing CHROME_USER_DATA_DIR.'); loginErrorOccurred = true; return loginErrorOccurred;
+    console.error('Login Robot: Missing CHROME_USER_DATA_DIR.'); return; 
   }
   console.log(`Login Robot: Chromium profile at ${CHROME_USER_DATA_DIR}`);
 
   if (!YOUTUBE_EMAIL || !YOUTUBE_PASSWORD) {
-    console.warn('Login Robot: No YOUTUBE_EMAIL/YOUTUBE_PASSWORD set.'); loginErrorOccurred = true; return loginErrorOccurred;
+    console.warn('Login Robot: No YOUTUBE_EMAIL/YOUTUBE_PASSWORD set.'); return; 
   }
 
   let browser;
   let page; 
 
   try {
-    console.log('Login Robot: Launching Chromium headless...');
-    browser = await puppeteer.launch({
+    console.log('Login Robot: Launching Chromium headless with Stealth...');
+    browser = await puppeteer.launch({ 
       executablePath: '/usr/bin/chromium', 
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${CHROME_USER_DATA_DIR}`]
+      headless: true, 
+      args: [
+        '--no-sandbox', 
+        '--disable-setuid-sandbox', 
+        '--disable-dev-shm-usage', 
+        `--user-data-dir=${CHROME_USER_DATA_DIR}`,
+        '--disable-blink-features=AutomationControlled' // A common stealth argument
+      ]
     });
 
     page = await browser.newPage();
-    
-    // *** MODIFICATION: Set unusual User Agent for Google Login ***
-    console.log('Login Robot: Setting unusual User Agent for login:', GOOGLE_LOGIN_USER_AGENT);
-    await page.setUserAgent(GOOGLE_LOGIN_USER_AGENT); 
+    await page.setViewport({ width: 1366, height: 768 }); // Use a standard viewport
+    // User agent is typically handled by stealth plugin, but you could force one if needed
 
     console.log('Login Robot: Proceeding to perform a fresh login...');            
-    await page.goto(GOOGLE_LOGIN_URL, { waitUntil: 'networkidle2', timeout: 30000 });
+    await page.goto(GOOGLE_LOGIN_URL, { waitUntil: 'networkidle2', timeout: 45000 }); // Increased timeout slightly
 
     console.log('Login Robot: Entering email...');
-    await page.waitForSelector('input[type="email"]', { timeout: 15000 });
+    await page.waitForSelector('input[type="email"]', { timeout: 20000 }); // Increased timeout
     await page.type('input[type="email"]', YOUTUBE_EMAIL, { delay: 120 });
     await page.click('#identifierNext');
     console.log('Login Robot: Clicked Next after email.');
     
-    // Wait briefly for next page load
-    await new Promise(resolve => setTimeout(resolve, 3000)); 
-    await page.screenshot({ path: 'login_ua_after_email.png' });
-    console.log('Login Robot: Screenshot login_ua_after_email.png saved.');
+    await new Promise(resolve => setTimeout(resolve, 3000)); // Brief pause
+    await page.screenshot({ path: 'login_stealth_after_email.png' });
+    console.log('Login Robot: Screenshot login_stealth_after_email.png saved.');
 
 
     console.log('Login Robot: Waiting for password field...');
-    await page.waitForSelector('input[type="password"]', { visible: true, timeout: 25000 }); 
+    // Use a more robust selector wait if possible, or increase timeout
+    await page.waitForSelector('input[type="password"]', { visible: true, timeout: 30000 }); // Increased timeout
     console.log('Login Robot: Password field found. Entering password...');
     await page.type('input[type="password"]', YOUTUBE_PASSWORD, { delay: 130 });
     await page.click('#passwordNext');
     console.log('Login Robot: Clicked Next after password.');
 
     console.log('Login Robot: Waiting for successful login confirmation...');
-    // If login succeeds with this UA, it might land somewhere unexpected, 
-    // so wait for navigation OR common elements.
+    // Wait for navigation to complete OR a known success element appears.
+    // This combination is generally more robust than waiting for just one.
     await Promise.race([
         page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 45000 }),
         page.waitForFunction(
+           // Look for YouTube avatar OR Google account elements
            `document.querySelector('ytd-topbar-menu-button-renderer yt-icon-button#button') || document.body.innerText.includes('Manage your Google Account') || document.querySelector('a[href*="accounts.google.com/SignOutOptions"]')`,
            { timeout: 45000 } 
          )
     ]);
     console.log('Login Robot: Login appears successful (navigation or success element found).');
    
-    // *** MODIFICATION: Optionally set User Agent back to normal for YouTube ***
-    // console.log('Login Robot: Setting User Agent back to normal...');
-    // await page.setUserAgent(NORMAL_BROWSER_USER_AGENT);
-
     console.log('Login Robot: Navigating to YouTube to finalize session and save cookies...');
     await page.goto(YOUTUBE_URL, { waitUntil: 'networkidle2', timeout: 30000 });
 
@@ -116,23 +118,22 @@ async function tryToLogInToYouTube() {
     if (isLikelyLoggedIn) {
       console.log('Login Robot: Login flow complete. Avatar found on YouTube.');
       await saveCookies(page);
-      // process.exitCode = 0; // Let the calling logic handle exit code based on return value
+      process.exitCode = 0; // <<< Set exit code to 0 ONLY on full success
     } else {
       console.error('Login Robot: Login FAILED. Avatar not found on YouTube after login flow.');
-      loginErrorOccurred = true; // Mark error if avatar not found
       if (page && typeof page.screenshot === 'function') {
-          await page.screenshot({ path: 'login_ua_final_youtube_missing_avatar.png' });
-          console.log('Login Robot: Screenshot login_ua_final_youtube_missing_avatar.png saved.');
+          await page.screenshot({ path: 'login_stealth_final_youtube_missing_avatar.png' });
+          console.log('Login Robot: Screenshot login_stealth_final_youtube_missing_avatar.png saved.');
       }
     }
 
   } catch (err) {
-    loginErrorOccurred = true; 
-    console.error('Login Robot: Critical error during unusual UA login flow:', err.message);
+    console.error('Login Robot: Critical error during stealth login flow:', err.message);
+    process.exitCode = 1; // Ensure exit code is 1 on error
     if (page && typeof page.screenshot === 'function') {
         try { 
-            await page.screenshot({ path: 'login_ua_critical_error.png' }); 
-            console.log('Login Robot: Screenshot login_ua_critical_error.png saved due to error.'); 
+            await page.screenshot({ path: 'login_stealth_critical_error.png' }); 
+            console.log('Login Robot: Screenshot login_stealth_critical_error.png saved due to error.'); 
         }
         catch (ssError) { console.error('Login Robot: Could not save error screenshot:', ssError.message); }
     }
@@ -142,23 +143,19 @@ async function tryToLogInToYouTube() {
       await browser.close();
     }
     console.log('Login Robot: Done.');
-    return loginErrorOccurred; // Return true if error occurred, false otherwise
+    // Removed direct process.exit - Manager script handles restart based on exit code
   }
 }
 
+// If your manager script runs this file with node, this block executes it.
+// If your manager script requires the module and calls tryToLogInToYouTube, 
+// it will rely on the process.exitCode being set.
 if (require.main === module) {
   console.log('Login Robot: Running standalone test mode…');
-  tryToLogInToYouTube()
-    .then((errorOccurred) => { 
-      // *** MODIFICATION: Still exit 0 for now to allow server to start for debugging ***
-      const exitCode = 0; 
-      console.log(`Login Robot: Exiting with code ${exitCode}. (Error occurred during run: ${errorOccurred})`);
-      process.exit(exitCode); 
-    })
-    .catch((err) => { 
-        console.error("Login Robot: Unhandled promise rejection in standalone mode:", err);
-        process.exit(1); 
-    });
+  tryToLogInToYouTube().finally(() => {
+    console.log(`Login Robot: Standalone execution finished. Exiting with code ${process.exitCode}.`);
+    process.exit(process.exitCode);
+  });
 }
 
 module.exports = { tryToLogInToYouTube };
