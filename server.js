@@ -39,6 +39,14 @@ app.post('/transcode', (req, res) => {
 // … all your other routes …
 
 // health-check endpoint for Coolify
+// expose yt-dlp version
+app.get('/yt-dlp-version', (_req, res) => {
+  const { spawn } = require('child_process');
+  const child = spawn('yt-dlp', ['--version']);
+  let out = '';
+  child.stdout.on('data', chunk => out += chunk);
+  child.on('close', () => res.send(out || 'no output'));
+});
 app.get('/health', (_req, res) => {
   res.status(200).send('OK');
 });
