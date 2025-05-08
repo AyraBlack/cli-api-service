@@ -2,8 +2,7 @@ const express = require('express');
 const { spawn } = require('child_process');
 const app = express();
 
-const YTDLP_BIN   = '/usr/local/bin/yt-dlp';
-const COOKIE_FILE = 'cookies.txt';   // make sure ./cookies.txt exists in your repo
+const YTDLP_BIN = '/usr/local/bin/yt-dlp'; // Path to yt-dlp binary
 
 // log every request
 app.use((req, res, next) => {
@@ -20,23 +19,23 @@ app.get('/health', (_req, res) => {
 
 // expose yt-dlp version
 app.get('/yt-dlp-version', (_req, res) => {
-  const child = spawn(YTDLP_BIN, ['--version'], { stdio: ['ignore','pipe','pipe'] });
+  const child = spawn(YTDLP_BIN, ['--version'], { stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   child.stdout.on('data', chunk => out += chunk);
   child.stderr.on('data', err => console.error('[yt-dlp version stderr]', err.toString()));
   child.on('close', () => res.send(out.trim() || 'no output'));
 });
 
-// download endpoint (works for raw files & YouTube)
+// download endpoint (raw media fallback & YouTube via yt-dlp + ffmpeg)
 app.get('/download', (req, res) => {
   const url = req.query.url;
   console.log('[DOWNLOAD] URL:', url);
   if (!url) return res.status(400).send('Missing ?url=');
 
-  // ── 1) RAW MEDIA FALLBACK ──
+  // 1) raw media fallback
   if (/\.(mp4|m4a|mov|avi|mkv)(\?.*)?$/i.test(url)) {
     console.log('[DOWNLOAD] direct HTTP fetch for file:', url);
-    const curlProc = spawn('curl', ['-L', url], { stdio: ['ignore','pipe','pipe'] });
+    const curlProc = spawn('curl', ['-L', url], { stdio: ['ignore', 'pipe', 'pipe'] });
     curlProc.stdout.pipe(res);
     curlProc.stderr.on('data', d => console.error('[curl stderr]', d.toString()));
     curlProc.on('error', e => console.error('[curl error]', e));
@@ -44,32 +43,34 @@ app.get('/download', (req, res) => {
     return;
   }
 
-  // ── 2) YT-DLP PATH ──
-  const format     = req.query.format || 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4';
-  const cookieArgs = ['--cookies', COOKIE_FILE];
+  // 2) YouTube & other URLs via yt-dlp + ffmpeg for QuickTime compatibility
+  const format = req.query.format || 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4';
   console.log('[DOWNLOAD] format:', format);
-
   res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
-  const downloader = spawn(
-    YTDLP_BIN,
-    [...cookieArgs, '-f', format, '-o', '-', url],
-    { stdio: ['ignore','pipe','pipe'] }
-  );
 
-  downloader.stdout.pipe(res);
-  downloader.stderr.on('data', data => console.error('[yt-dlp stderr]', data.toString()));
-  downloader.on('error', err => console.error('[yt-dlp spawn error]', err));
-  downloader.on('close', code => console.log('[yt-dlp exit code]', code));
+  const args = [
+    '-f', format,
+    '--external-downloader', 'ffmpeg',
+    '--external-downloader-args', '-c:v libx264 -c:a aac -movflags +faststart',
+    '-o', '-',
+    url
+  ];
+
+  const child = spawn(YTDLP_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  child.stdout.pipe(res);
+  child.stderr.on('data', data => console.error('[yt-dlp stderr]', data.toString()));
+  child.on('error', err => console.error('[yt-dlp spawn error]', err));
+  child.on('close', code => console.log('[yt-dlp exit code]', code));
 });
 
-// transcode endpoint (ffmpeg)
+// transcode endpoint (if needed)
 app.post('/transcode', (req, res) => {
   const { inputUrl, args = [] } = req.body;
   console.log('[TRANSCODE] URL:', inputUrl, 'Args:', args);
   if (!inputUrl) return res.status(400).send('Missing JSON { "inputUrl": "..." }');
 
   res.setHeader('Content-Type', 'video/mp4');
-  const ff = spawn('ffmpeg', ['-i', inputUrl, ...args, '-f', 'mp4', 'pipe:1'], { stdio: ['ignore','pipe','pipe'] });
+  const ff = spawn('ffmpeg', ['-i', inputUrl, ...args, '-f', 'mp4', 'pipe:1'], { stdio: ['ignore', 'pipe', 'pipe'] });
   ff.stdout.pipe(res);
   ff.stderr.on('data', d => console.error('[ffmpeg stderr]', d.toString()));
   ff.on('error', e => console.error('[ffmpeg error]', e));
