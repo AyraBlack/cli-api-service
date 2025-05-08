@@ -1,6 +1,8 @@
 FROM node:18-slim
 
 USER root
+
+# Install system dependencies + Chromium for cookies-from-browser
 RUN apt-get update && apt-get install -y \
       ffmpeg \
       curl \
@@ -19,20 +21,24 @@ RUN apt-get update && apt-get install -y \
       libnss3 \
       lsb-release \
       xdg-utils \
+      chromium \
     && rm -rf /var/lib/apt/lists/*
 
+# Install yt-dlp
 RUN curl -L \
       https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
       -o /usr/local/bin/yt-dlp \
   && chmod +x /usr/local/bin/yt-dlp
 
+# Install Puppeteer (for headless Chrome if needed)
 RUN npm install --global puppeteer
 
 WORKDIR /usr/src/app
 
-# Bring your YouTube auth cookies into the container
+# Bring your YouTube auth cookies into the container (if you still use a static file)
 COPY cookies.txt ./
 
+# Copy and install Node app
 COPY package.json ./
 RUN npm install --production
 COPY . .
