@@ -2,6 +2,9 @@ const express = require('express');
 const { spawn } = require('child_process');
 const app = express();
 
+const YTDLP_BIN   = '/usr/local/bin/yt-dlp';
+const COOKIE_FILE = 'cookies.txt';   // make sure ./cookies.txt exists in your repo
+
 // log every request
 app.use((req, res, next) => {
   console.log('[REQ]', req.method, req.path);
@@ -17,20 +20,20 @@ app.get('/health', (_req, res) => {
 
 // expose yt-dlp version
 app.get('/yt-dlp-version', (_req, res) => {
-  const child = spawn('/usr/local/bin/yt-dlp', ['--version'], { stdio: ['ignore','pipe','pipe'] });
+  const child = spawn(YTDLP_BIN, ['--version'], { stdio: ['ignore','pipe','pipe'] });
   let out = '';
   child.stdout.on('data', chunk => out += chunk);
   child.stderr.on('data', err => console.error('[yt-dlp version stderr]', err.toString()));
   child.on('close', () => res.send(out.trim() || 'no output'));
 });
 
-// download endpoint
+// download endpoint (works for raw files & YouTube)
 app.get('/download', (req, res) => {
   const url = req.query.url;
   console.log('[DOWNLOAD] URL:', url);
   if (!url) return res.status(400).send('Missing ?url=');
 
-  // ⬇️ fallback for direct media URLs
+  // ── 1) RAW MEDIA FALLBACK ──
   if (/\.(mp4|m4a|mov|avi|mkv)(\?.*)?$/i.test(url)) {
     console.log('[DOWNLOAD] direct HTTP fetch for file:', url);
     const curlProc = spawn('curl', ['-L', url], { stdio: ['ignore','pipe','pipe'] });
@@ -41,14 +44,15 @@ app.get('/download', (req, res) => {
     return;
   }
 
-  // ⬇️ otherwise use yt-dlp for YouTube (and other) URLs
-  const format = req.query.format || 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4';
+  // ── 2) YT-DLP PATH ──
+  const format     = req.query.format || 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4';
+  const cookieArgs = ['--cookies', COOKIE_FILE];
   console.log('[DOWNLOAD] format:', format);
 
   res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
   const downloader = spawn(
-    '/usr/local/bin/yt-dlp',
-    ['-f', format, '-o', '-', url],
+    YTDLP_BIN,
+    [...cookieArgs, '-f', format, '-o', '-', url],
     { stdio: ['ignore','pipe','pipe'] }
   );
 
@@ -58,7 +62,7 @@ app.get('/download', (req, res) => {
   downloader.on('close', code => console.log('[yt-dlp exit code]', code));
 });
 
-// transcode endpoint
+// transcode endpoint (ffmpeg)
 app.post('/transcode', (req, res) => {
   const { inputUrl, args = [] } = req.body;
   console.log('[TRANSCODE] URL:', inputUrl, 'Args:', args);
