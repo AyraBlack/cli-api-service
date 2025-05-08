@@ -1,4 +1,4 @@
-// server.js - Proxy Method - Added Full stderr logging and Directory Listing
+// server.js - Proxy Method - Added --verbose, removed --ignore-errors
 
 const express = require('express');
 const { spawn } = require('child_process');
@@ -34,8 +34,8 @@ app.get('/health', (_req, res) => {
 });
 
 app.get('/yt-dlp-version', (_req, res) => {
-  // ... (yt-dlp-version code remains the same - see previous versions) ...
-  try {
+  // ... (yt-dlp-version code remains the same) ...
+   try {
     const child = spawn(YTDLP_BIN, ['--version'], { stdio: ['ignore','pipe','pipe'] });
     let out = '';
     let errorOutput = '';
@@ -90,10 +90,10 @@ app.get('/download', (req, res) => {
     '--write-auto-subs', 
     '--sub-lang', lang, 
     '-o', outputTemplate, 
-    // '--no-warnings', // REMOVED to see potential warnings
-    '--ignore-errors', 
+    // '--no-warnings', // REMOVED to see warnings
+    // '--ignore-errors', // REMOVED to make errors fatal
     '--print', 'id', 
-    // '--verbose', // Optional: Add for maximum yt-dlp debug output
+    '--verbose', // ADDED for detailed debug output
     url
   ];
 
@@ -103,16 +103,17 @@ app.get('/download', (req, res) => {
   try {
       const child = spawn(YTDLP_BIN, args, { stdio: ['ignore','pipe','pipe'] }); 
 
-      let stderrOutput = '';
+      let stderrOutput = ''; // Collect ALL stderr
+      let stdoutOutput = ''; // Collect ALL stdout (including video ID)
+
       child.stdout.on('data', (data) => {
-          const idChunk = data.toString().trim();
-          videoId += idChunk; 
-          console.log(`[yt-dlp stdout] Captured Video ID fragment: ${idChunk}`);
+          const dataStr = data.toString();
+          console.log(`[yt-dlp stdout] ${dataStr.trim()}`); // Log all stdout
+          stdoutOutput += dataStr; 
       });
       child.stderr.on('data', (data) => {
         const line = data.toString(); 
-        // *** MODIFICATION: Log ALL stderr lines ***
-        console.error('[yt-dlp stderr]', line.trim()); 
+        console.error('[yt-dlp stderr]', line.trim()); // Log all stderr
         stderrOutput += line; 
       });
 
@@ -123,20 +124,36 @@ app.get('/download', (req, res) => {
 
       child.on('close', async (code) => { 
         console.log(`[yt-dlp exit code] ${code}`);
-        videoId = videoId.trim(); // Finalize video ID capture
+        // Extract video ID from the collected stdout (it might be mixed with other output now)
+        // Look for a typical YouTube ID pattern at the end of the output
+        const idMatch = stdoutOutput.match(/([a-zA-Z0-9_-]{11})$/);
+        videoId = idMatch ? idMatch[1] : '';
 
-        // *** ADDED: List directory contents ***
+        // Fallback for video ID extraction if --print id failed or wasn't last line
+        if (!videoId) {
+            try {
+                 const urlObj = new URL(url);
+                 if (urlObj.hostname.includes('youtube.com') || urlObj.hostname.includes('youtu.be')) {
+                     videoId = urlObj.searchParams.get('v') || urlObj.pathname.split('/').pop();
+                 }
+            } catch (e) { /* ignore */ }
+            videoId = videoId || 'unknown_video'; 
+            console.warn(`[DOWNLOAD] Could not reliably get video ID, using fallback/guess: ${videoId}`);
+        } else {
+             console.log(`[DOWNLOAD] Determined Video ID: ${videoId}`);
+        }
+
+        // List directory contents AFTER yt-dlp finishes
+        let filesInDir = [];
         try {
-            const filesInDir = await fs.readdir(DOWNLOAD_DIR);
+            filesInDir = await fs.readdir(DOWNLOAD_DIR);
             console.log(`[DEBUG] Files found in ${DOWNLOAD_DIR} after yt-dlp exit: [${filesInDir.join(', ')}]`);
         } catch (readErr) {
             console.error(`[DEBUG] Error listing files in ${DOWNLOAD_DIR}:`, readErr);
         }
-        // *** END ADDED ***
-
-        const significantErrorOccurred = code !== 0 && !stderrOutput.toLowerCase().includes('subtitles not found');
-        if (significantErrorOccurred) { 
-            // ... (error handling remains the same) ...
+       
+        // Now, a non-zero exit code IS an error because we removed --ignore-errors
+        if (code !== 0) { 
             if (stderrOutput.includes('proxy') || stderrOutput.includes('Unsupported proxy type') || stderrOutput.includes('timed out')) {
                  console.error(`[DOWNLOAD] Proxy error detected for URL: ${url} (exit code ${code})`);
                  if (!res.headersSent) { res.status(502).send(`Proxy error occurred.\n\nStderr:\n${stderrOutput}`); }
@@ -144,23 +161,12 @@ app.get('/download', (req, res) => {
                 console.error(`[DOWNLOAD] yt-dlp failed for URL: ${url} (exit code ${code})`);
                 if (!res.headersSent) { res.status(500).send(`yt-dlp process exited with error code ${code}.\n\nStderr:\n${stderrOutput}`); }
             }
-            return; 
+            return; // Stop processing on error
         }
         
-        // Fallback for video ID extraction
-        if (!videoId) {
-            // ... (videoId fallback remains the same) ...
-             try {
-                 const urlObj = new URL(url);
-                 if (urlObj.hostname.includes('youtube.com') || urlObj.hostname.includes('youtu.be')) {
-                     videoId = urlObj.searchParams.get('v') || urlObj.pathname.split('/').pop();
-                 }
-            } catch (e) { /* ignore */ }
-            videoId = videoId || 'unknown_video'; 
-            console.warn(`[DOWNLOAD] Could not get video ID via --print id, using fallback: ${videoId}`);
-        }
-
-        console.log(`[DOWNLOAD] yt-dlp finished for video: ${videoId}. Preparing ZIP file.`);
+        // --- If yt-dlp finished with exit code 0, proceed to ZIP ---
+        console.log(`[DOWNLOAD] yt-dlp finished successfully for ${videoId}. Preparing ZIP file.`);
+        
         const expectedAudioFilename = `${videoId}.${audioFormat}`;
         const expectedSubsFilename = `${videoId}.${lang}.vtt`; 
         const audioFilePath = path.join(DOWNLOAD_DIR, expectedAudioFilename);
@@ -183,8 +189,8 @@ app.get('/download', (req, res) => {
             } catch (subsErr) { console.warn(`[ZIP] Subtitle file not found: ${expectedSubsFilename}`); }
 
             if (filesToZip.length === 0) {
-                console.error('[ZIP] No files found to zip!');
-                if (!res.headersSent) { res.status(404).send(`Neither audio nor subtitle file was successfully created for video ${videoId}. Check server logs and yt-dlp stderr:\n${stderrOutput}`); }
+                console.error('[ZIP] No files found to zip even though yt-dlp exited successfully!');
+                if (!res.headersSent) { res.status(404).send(`No files were created for video ${videoId}, despite successful exit code. Check server logs and yt-dlp stderr:\n${stderrOutput}`); }
                 return;
             }
 
@@ -200,7 +206,7 @@ app.get('/download', (req, res) => {
             await archive.finalize(); 
             console.log(`[ZIP] Archive finalized and sent: ${zipFilename}`);
 
-            // Optional: Clean up downloaded files
+            // Optional: Clean up
             // setTimeout(async () => { /* ... cleanup ... */ }, 15000); 
 
         } catch (zipError) { 
