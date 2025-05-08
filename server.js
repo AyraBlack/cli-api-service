@@ -1,4 +1,4 @@
-// server.js - WITH temporary endpoint to download screenshots
+// server.js - WITH temporary endpoint to download screenshots (Corrected Copy)
 
 const express = require('express');
 const { spawn } = require('child_process');
@@ -20,23 +20,39 @@ app.get('/health', (_req, res) => {
   res.status(200).send('OK');
 });
 
-// ++++++++++++++++ ADDING THIS TEMPORARY ENDPOINT BACK ++++++++++++++++
+// ++++++++++++++++ TEMPORARY ENDPOINT TO GET SCREENSHOTS ++++++++++++++++
 app.get('/get-debug-screenshot', (req, res) => {
   const fileName = req.query.name; // Get filename from query parameter
-  if (!fileName || !fileName.endsWith('.png')) {
+  // Basic validation for security: only allow .png files and prevent directory traversal
+  if (!fileName || !fileName.endsWith('.png') || fileName.includes('/') || fileName.includes('..')) {
     return res.status(400).send('Please provide a valid .png filename in the ?name= parameter.');
   }
 
-  // Assumes server.js is in /usr/src/app, same place screenshots are saved
+  // Assumes server.js is in /usr/src/app, same place screenshots are saved by login.js
   const filePath = path.join(__dirname, fileName); 
   console.log('[DEBUG] Attempting to send screenshot:', filePath);
 
   if (fs.existsSync(filePath)) {
-    res.sendFile(filePath, (err) => { 
+    // Use options to prevent potential issues and handle errors
+    const options = {
+      root: __dirname, // Set root directory for security
+      dotfiles: 'deny', // Deny access to dotfiles
+      headers: {
+        'x-timestamp': Date.now(),
+        'x-sent': true
+      }
+    };
+
+    res.sendFile(fileName, options, (err) => { // Pass options and callback
       if (err) {
-        console.error('[DEBUG] Error sending screenshot:', err);
+        console.error('[DEBUG] Error sending screenshot:', fileName, err);
         if (!res.headersSent) {
-          res.status(500).send('Error sending screenshot file.');
+          // Send a clearer error status if possible
+          if (err.status) {
+             res.status(err.status).send(`Error sending file: ${err.message}`);
+          } else {
+             res.status(500).send('Error sending screenshot file.');
+          }
         }
       } else {
         console.log('[DEBUG] Screenshot sent successfully:', fileName);
@@ -92,3 +108,10 @@ app.get('/download', (req, res) => {
   child.on('close', code => {
     console.log('[yt-dlp exit code]', code);
     if (code !== 0 && !res.headersSent) {
+      res.status(500).send(`yt-dlp exited with ${code}. Check logs.`);
+    }
+  });
+});
+
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log(`🚀 API listening on port ${port}`)); // This should be the last executed line in a successful start
