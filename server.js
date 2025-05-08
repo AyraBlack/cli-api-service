@@ -26,7 +26,7 @@ app.get('/yt-dlp-version', (_req, res) => {
   child.on('close', () => res.send(out.trim() || 'no output'));
 });
 
-// download endpoint (raw-file fallback & yt-dlp with cookies-from-browser + ffmpeg)
+// download endpoint (raw-file fallback & yt-dlp with custom UA + ffmpeg)
 app.get('/download', (req, res) => {
   const url = req.query.url;
   console.log('[DOWNLOAD] URL:', url);
@@ -43,14 +43,14 @@ app.get('/download', (req, res) => {
     return;
   }
 
-  // 2) YouTube & others via yt-dlp + ffmpeg for QuickTime compatibility
+  // 2) Use yt-dlp with a browser-like User-Agent header and ffmpeg
   const format = req.query.format || 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4';
   console.log('[DOWNLOAD] yt-dlp format:', format);
 
   res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
 
   const args = [
-    '--cookies-from-browser', 'chromium',
+    '--add-header', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
     '-f', format,
     '--external-downloader', 'ffmpeg',
     '--external-downloader-args', '-c:v libx264 -c:a aac -movflags +faststart',
