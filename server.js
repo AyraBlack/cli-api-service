@@ -35,7 +35,7 @@ app.get('/download', (req, res) => {
   res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
 
   const args = [
-    '--cookies', 'cookies.txt',        // ← use the bundled cookies file
+    '--cookies', '/usr/src/app/cookies.txt',  // ← MODIFIED: Use the absolute path to the cookies file
     '-f', format,
     '--add-header',
       'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
