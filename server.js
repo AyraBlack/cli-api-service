@@ -4,22 +4,17 @@ const { spawn } = require('child_process');
 const app = express();
 
 const YTDLP_BIN = '/usr/local/bin/yt-dlp';
-// where Puppeteer stored Chromium’s profile
-const CHROME_USER_DATA_DIR = process.env.CHROME_USER_DATA_DIR || '/home/node/chromium-profile';
 
-// log every request
 app.use((req, res, next) => {
   console.log('[REQ]', req.method, req.path);
   next();
 });
 app.use(express.json());
 
-// health endpoint
 app.get('/health', (_req, res) => {
   res.status(200).send('OK');
 });
 
-// version endpoint
 app.get('/yt-dlp-version', (_req, res) => {
   const child = spawn(YTDLP_BIN, ['--version'], { stdio: ['ignore','pipe','pipe'] });
   let out = '';
@@ -31,41 +26,27 @@ app.get('/yt-dlp-version', (_req, res) => {
   });
 });
 
-// download endpoint
 app.get('/download', (req, res) => {
   const url = req.query.url;
   console.log('[DOWNLOAD] URL:', url);
   if (!url) return res.status(400).send('Missing ?url=');
 
-  // 1) Raw‐file fallback for direct links
-  if (/\.(mp4|m4a|mov|avi|mkv)(\?.*)?$/i.test(url)) {
-    console.log('[DOWNLOAD] direct HTTP fetch for file:', url);
-    res.setHeader('Content-Disposition', 'attachment; filename="' + url.split('/').pop().split('?')[0] + '"');
-    const curlProc = spawn('curl', ['-L', url], { stdio: ['ignore','pipe','pipe'] });
-    curlProc.stdout.pipe(res);
-    curlProc.stderr.on('data', d => console.error('[curl stderr]', d.toString()));
-    curlProc.on('error', e => console.error('[curl error]', e));
-    curlProc.on('close', code => console.log('[curl exit code]', code));
-    return;
-  }
-
-  // 2) Everything else via yt-dlp (+ cookies from Chromium, + ffmpeg for MP4)
   const format = req.query.format || 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4';
   res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
 
   const args = [
-    '--cookies-from-browser', `chromium:${CHROME_USER_DATA_DIR}`,
+    '--cookies', 'cookies.txt',        // ← use the bundled cookies file
+    '-f', format,
     '--add-header',
       'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-    + 'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
-    '-f', format,
+     + 'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
     '--external-downloader', 'ffmpeg',
     '--external-downloader-args', '-c:v libx264 -c:a aac -movflags +faststart',
     '-o', '-',
     url
   ];
 
-  console.log('[DOWNLOAD] Spawning yt-dlp:', YTDLP_BIN, args.join(' '));
+  console.log('[DOWNLOAD] Spawning:', YTDLP_BIN, args.join(' '));
   const child = spawn(YTDLP_BIN, args, { stdio: ['ignore','pipe','pipe'] });
 
   child.stdout.pipe(res);
@@ -82,6 +63,5 @@ app.get('/download', (req, res) => {
   });
 });
 
-// start server
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`🚀 API listening on port ${port}`));
