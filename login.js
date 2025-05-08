@@ -1,4 +1,4 @@
-// login.js - Updated to use TOTP for 2-Step Verification
+// login.js - Updated to use TOTP and fix waitForTimeout
 
 const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
@@ -11,7 +11,7 @@ const GOOGLE_LOGIN_URL = 'https://accounts.google.com/signin/v2/identifier';
 
 const YOUTUBE_EMAIL = process.env.YOUTUBE_EMAIL;
 const YOUTUBE_PASSWORD = process.env.YOUTUBE_PASSWORD;
-const YOUTUBE_TOTP_SECRET = process.env.YOUTUBE_TOTP_SECRET; // Will get this from Coolify env vars
+const YOUTUBE_TOTP_SECRET = process.env.YOUTUBE_TOTP_SECRET; 
 
 const COOKIE_FILE_PATH = path.join(process.cwd(), 'cookies.txt');
 
@@ -84,7 +84,6 @@ async function tryToLogInToYouTube() {
     console.log('Login Robot: Waiting for navigation or 2FA prompt after password...');
 
     try {
-      // Wait for a general 2FA page indicator.
       await page.waitForFunction(
         () => document.body.innerText.includes('2-Step Verification') || document.body.innerText.includes('Verify it’s you'),
         { timeout: 20000 }
@@ -93,7 +92,6 @@ async function tryToLogInToYouTube() {
       await page.screenshot({ path: '2fa_page_detected.png' });
       console.log('Login Robot: Screenshot 2fa_page_detected.png saved.');
 
-      // Try to click "Try another way"
       console.log('Login Robot: Attempting to click "Try another way"...');
       await page.evaluate(() => {
         const buttons = Array.from(document.querySelectorAll('button, div[role="button"], a, span[role="link"]'));
@@ -102,20 +100,21 @@ async function tryToLogInToYouTube() {
         else throw new Error('"Try another way" element not found.');
       });
       console.log('Login Robot: Clicked "Try another way". Waiting for options...');
-      await page.waitForTimeout(3000); // Give page time to show options
+      // MODIFIED LINE: Replaced page.waitForTimeout
+      await new Promise(resolve => setTimeout(resolve, 3000)); // Give page time to show options
       await page.screenshot({ path: '2fa_try_another_way_options.png' });
       console.log('Login Robot: Screenshot 2fa_try_another_way_options.png saved.');
       
-      // Try to click "Get a verification code from the Google Authenticator app"
       console.log('Login Robot: Attempting to select "Authenticator app" option...');
-      await page.evaluate(() => {
-        const options = Array.from(document.querySelectorAll('div[role="link"], div[role="button"], li[role="menuitem"], div[data-challengetype]')); // Common elements for options
+      await page.evaluate(() => { // Removed unused text parameter from here
+        const options = Array.from(document.querySelectorAll('div[role="link"], div[role="button"], li[role="menuitem"], div[data-challengetype]'));
         const targetOption = options.find(opt => opt.innerText && (opt.innerText.toLowerCase().includes("authenticator app") || opt.innerText.toLowerCase().includes("google authenticator")));
         if (targetOption) targetOption.click();
         else throw new Error('"Authenticator app" option not found.');
       });
       console.log('Login Robot: Selected "Authenticator app". Waiting for code input field...');
-      await page.waitForTimeout(3000); // Give page time to show input field
+      // MODIFIED LINE: Replaced page.waitForTimeout
+      await new Promise(resolve => setTimeout(resolve, 3000)); // Give page time to show input field
       await page.screenshot({ path: '2fa_totp_input_page.png' });
       console.log('Login Robot: Screenshot 2fa_totp_input_page.png saved.');
 
@@ -126,7 +125,6 @@ async function tryToLogInToYouTube() {
       console.log(`Login Robot: Generated TOTP code: ${totpCode}. Entering code...`);
       await page.type(totpInputSelector, totpCode, { delay: 150 });
 
-      // Try to check "Don't ask again on this device"
       const checkboxSelector = 'input[type="checkbox"][name="PersistentCookie"], input[type="checkbox"]#PersistentCookie';
       try {
         const checkbox = await page.$(checkboxSelector);
@@ -144,23 +142,15 @@ async function tryToLogInToYouTube() {
         console.error('Login Robot: Error with "Don\'t ask again" checkbox:', cbErr.message);
       }
       
-      // Click Next/Submit after entering TOTP code
-      // Common selectors: button with text "Next", "Verify", or a primary submit button
-      const submitButtonSelector = 'button[jsname="LgbsSe"], button:has-text("Next"), button:has-text("Verify"), input[type="submit"]';
       console.log('Login Robot: Submitting TOTP code...');
-      await page.evaluate((selector) => {
-          const buttons = Array.from(document.querySelectorAll(selector.split(',')[0])); // Use first part of complex selector or adapt
+      await page.evaluate(() => { // Removed unused selector parameter
+          const buttons = Array.from(document.querySelectorAll('button, div[role="button"]')); // Simpler selector for submit
           let targetButton = buttons.find(btn => btn.innerText && (btn.innerText.toLowerCase() === "next" || btn.innerText.toLowerCase() === "verify"));
-          if (!targetButton) { // Fallback to other selectors or a more generic primary button
-             const allButtons = Array.from(document.querySelectorAll('button'));
-             targetButton = allButtons.find(btn => btn.innerText && (btn.innerText.toLowerCase() === "next" || btn.innerText.toLowerCase() === "verify"));
-          }
           if (targetButton) targetButton.click();
-          else throw new Error('Submit button for TOTP not found.');
-      }, submitButtonSelector); // Pass the selector string for evaluation context
+          else throw new Error('Submit button for TOTP (Next/Verify) not found.');
+      });
 
       console.log('Login Robot: TOTP submitted. Waiting for login confirmation...');
-      // Wait for signs of successful login after 2FA
       await page.waitForFunction(
         `document.querySelector('ytd-topbar-menu-button-renderer yt-icon-button#button') || document.body.innerText.includes('Welcome,') || document.body.innerText.includes('Manage your Google Account') || document.querySelector('a[href*="accounts.google.com/SignOutOptions"]')`,
         { timeout: 45000 }
@@ -169,9 +159,11 @@ async function tryToLogInToYouTube() {
 
     } catch (e) {
       console.error('Login Robot: Error during 2FA (TOTP) flow or 2FA not detected as expected:', e.message);
-      await page.screenshot({ path: '2fa_flow_error.png' });
-      console.log('Login Robot: Screenshot 2fa_flow_error.png saved.');
-      // If 2FA flow failed, we might still proceed to YouTube page to see what happens.
+      // Ensure page object is available before trying to take a screenshot
+      if (page && typeof page.screenshot === 'function') {
+          await page.screenshot({ path: '2fa_flow_error.png' });
+          console.log('Login Robot: Screenshot 2fa_flow_error.png saved.');
+      }
     }
 
     console.log('Login Robot: Navigating to YouTube to finalize session and save cookies...');
@@ -183,14 +175,16 @@ async function tryToLogInToYouTube() {
       console.log('Login Robot: Login flow complete. Avatar found on YouTube.');
     } else {
       console.warn('Login Robot: Avatar not found on YouTube after login flow. Login may be incomplete.');
-      await page.screenshot({ path: 'login_final_youtube_missing_avatar.png' });
-      console.log('Login Robot: Screenshot login_final_youtube_missing_avatar.png saved.');
+      if (page && typeof page.screenshot === 'function') {
+          await page.screenshot({ path: 'login_final_youtube_missing_avatar.png' });
+          console.log('Login Robot: Screenshot login_final_youtube_missing_avatar.png saved.');
+      }
     }
     await saveCookies(page);
 
   } catch (err) {
     console.error('Login Robot: Critical error during login flow:', err.message);
-    if (page) {
+    if (page && typeof page.screenshot === 'function') {
         try { await page.screenshot({ path: 'login_critical_error_main.png' }); console.log('Login Robot: Screenshot login_critical_error_main.png saved.'); }
         catch (ssError) { console.error('Login Robot: Could not save main error screenshot:', ssError.message); }
     }
