@@ -30,6 +30,17 @@ app.get('/download', (req, res) => {
   console.log('[DOWNLOAD] URL:', url);
   if (!url) return res.status(400).send('Missing ?url=');
 
+  // fallback for direct file URLs
+  if (/\.(mp4|m4a|mov|avi|mkv)(\?.*)?$/i.test(url)) {
+    console.log('[DOWNLOAD] direct HTTP fetch for file:', url);
+    const curlProc = spawn('curl', ['-L', url], { stdio: ['ignore','pipe','pipe'] });
+    curlProc.stdout.pipe(res);
+    curlProc.stderr.on('data', d => console.error('[curl stderr]', d.toString()));
+    curlProc.on('error', e => console.error('[curl error]', e));
+    curlProc.on('close', code => console.log('[curl exit code]', code));
+    return;
+  }
+
   const format = req.query.format || 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4';
   console.log('[DOWNLOAD] format:', format);
 
@@ -63,4 +74,3 @@ app.post('/transcode', (req, res) => {
 // start server
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`🚀 API listening on port ${port}`));
-
