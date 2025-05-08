@@ -8,7 +8,10 @@
   },
   "dependencies": {
     "express": "^4.18.2",
-    "puppeteer": "^19.11.1",
+    "puppeteer": "^19.11.1",  // This is great! It's already here.
     "ytdl-core": "^4.11.1"
-  }
+  },
+  "engines": {                 // --- OPTIONAL ADDITION ---
+    "node": ">=18.0.0"         // Suggests Node.js version 18 or newer
+  }                            // --- END OF OPTIONAL ADDITION ---
 }
