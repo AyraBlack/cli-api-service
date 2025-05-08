@@ -50,7 +50,7 @@ app.get('/download', (req, res) => {
   res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
 
   const args = [
-    '--cookies-from-browser', 'chrome',
+    '--cookies-from-browser', 'chromium',
     '-f', format,
     '--external-downloader', 'ffmpeg',
     '--external-downloader-args', '-c:v libx264 -c:a aac -movflags +faststart',
