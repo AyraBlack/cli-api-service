@@ -5,6 +5,7 @@ const path = require('path');
 const app = express();
 
 const YTDLP_BIN = '/usr/local/bin/yt-dlp';
+const COOKIES_FILE_PATH = '/usr/src/app/cookies.txt'; // baked-in cookies.txt
 
 // log every request
 app.use((req, res, next) => {
@@ -64,24 +65,29 @@ app.get('/download', async (req, res) => {
     .pipe(res);
   }
 
-  // 3) Other sites via yt-dlp
+  // 3) Other sites via yt-dlp with cookies + ffmpeg for QuickTime compatibility
   console.log('[DOWNLOAD] fallback yt-dlp');
   const format = req.query.format || 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4';
   res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
 
   const args = [
     '--add-header', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    '--cookies', COOKIES_FILE_PATH,           // ← ensure cookies.txt is passed
     '-f', format,
     '--external-downloader', 'ffmpeg',
     '--external-downloader-args', '-c:v libx264 -c:a aac -movflags +faststart',
-    '-o', '-',
+    '-o', '-', // stream to stdout
     url
   ];
 
+  console.log(`[DOWNLOAD] Spawning yt-dlp with args: ${YTDLP_BIN} ${args.join(' ')}`);
   const child = spawn(YTDLP_BIN, args, { stdio: ['ignore','pipe','pipe'] });
   child.stdout.pipe(res);
   child.stderr.on('data', d => console.error('[yt-dlp stderr]', d.toString()));
-  child.on('error', e => console.error('[yt-dlp spawn error]', e));
+  child.on('error', e => {
+    console.error('[yt-dlp spawn error]', e);
+    if (!res.headersSent) res.status(500).send('Error starting yt-dlp');
+  });
   child.on('close', code => console.log('[yt-dlp exit code]', code));
 });
 
