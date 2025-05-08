@@ -12,7 +12,7 @@
     "ytdl-core": "^4.11.1",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "archiver": "^7.0.1",
+    "archiver": "^7.0.1"
   },
   "engines": {
     "node": ">=18.0.0"
