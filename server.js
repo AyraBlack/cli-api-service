@@ -5,13 +5,31 @@ app.use(express.json());
 
 // 1) Download with yt-dlp
 app.get('/download', (req, res) => {
+  const YTDLP = '/usr/local/bin/yt-dlp'; // absolute path to yt-dlp
+
+app.get('/download', (req, res) => {
   const url = req.query.url;
+  console.log('[DOWNLOAD] requested URL:', url);
   if (!url) return res.status(400).send('Missing ?url=');
+
+  const format = req.query.format
+    || 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4';
+  console.log('[DOWNLOAD] using format:', format);
+
   res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
-  spawn('yt-dlp', ['-f', 'best', '-o', '-', url])
-    .stdout.pipe(res)
-    .on('error', err => res.status(500).send(err.toString()));
+
+  const child = require('child_process').spawn(
+    YTDLP,
+    ['-f', format, '-o', '-', url],
+    { stdio: ['ignore','pipe','pipe'] }
+  );
+
+  child.stdout.pipe(res);
+  child.stderr.on('data', data => console.error('[yt-dlp stderr]', data.toString()));
+  child.on('error', err => console.error('[yt-dlp spawn error]', err));
+  child.on('close', code => console.log('[yt-dlp exit code]', code));
 });
+
 
 // 2) Render a webpage to PDF
 app.post('/render-pdf', async (req, res) => {
