@@ -1,83 +1,66 @@
 const express = require('express');
 const { spawn } = require('child_process');
 const app = express();
-app.use(express.json());
 
-// log every request to see what hits the server
+// log every request
 app.use((req, res, next) => {
   console.log('[REQ]', req.method, req.path);
   next();
 });
 
+app.use(express.json());
 
-// 1) Download with yt-dlp
-app.get('/download', (req, res) => {
-  const YTDLP = '/usr/local/bin/yt-dlp'; // absolute path to yt-dlp
-
-app.get('/download', (req, res) => {
-  const url = req.query.url;
-  console.log('[DOWNLOAD] requested URL:', url);
-  if (!url) return res.status(400).send('Missing ?url=');
-
-  const format = req.query.format
-    || 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4';
-  console.log('[DOWNLOAD] using format:', format);
-
-  res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
-
-  const child = require('child_process').spawn(
-    YTDLP,
-    ['-f', format, '-o', '-', url],
-    { stdio: ['ignore','pipe','pipe'] }
-  );
-
-  child.stdout.pipe(res);
-  child.stderr.on('data', data => console.error('[yt-dlp stderr]', data.toString()));
-  child.on('error', err => console.error('[yt-dlp spawn error]', err));
-  child.on('close', code => console.log('[yt-dlp exit code]', code));
-});
-
-
-// 2) Render a webpage to PDF
-app.post('/render-pdf', async (req, res) => {
-  const puppeteer = require('puppeteer');
-  const browser = await puppeteer.launch({ args: ['--no-sandbox'] });
-  const page = await browser.newPage();
-  const url = req.body.url;
-  if (!url) { await browser.close(); return res.status(400).send('Missing JSON { "url": "..." }'); }
-  await page.goto(url, { waitUntil: 'networkidle0' });
-  const pdf = await page.pdf({ format: 'A4', printBackground: true });
-  await browser.close();
-  res.contentType('application/pdf').send(pdf);
-});
-
-// 3) Transcode with FFmpeg
-app.post('/transcode', (req, res) => {
-  const { inputUrl, args = [] } = req.body;
-  if (!inputUrl) return res.status(400).send('Missing JSON { "inputUrl": "..." }');
-  res.setHeader('Content-Type', 'video/mp4');
-  spawn('ffmpeg', ['-i', inputUrl, ...args, 'pipe:1'])
-    .stdout.pipe(res)
-    .on('error', err => res.status(500).send(err.toString()));
-});
-
-// … all your other routes …
-
-// health-check endpoint for Coolify
-// expose yt-dlp version
-app.get('/yt-dlp-version', (_req, res) => {
-  const { spawn } = require('child_process');
-  const child = spawn('yt-dlp', ['--version']);
-  let out = '';
-  child.stdout.on('data', chunk => out += chunk);
-  child.on('close', () => res.send(out || 'no output'));
-});
+// health-check endpoint
 app.get('/health', (_req, res) => {
   res.status(200).send('OK');
 });
 
-// Start server
+// expose yt-dlp version
+app.get('/yt-dlp-version', (_req, res) => {
+  const child = spawn('/usr/local/bin/yt-dlp', ['--version'], { stdio: ['ignore','pipe','pipe'] });
+  let out = '';
+  child.stdout.on('data', chunk => out += chunk);
+  child.stderr.on('data', err => console.error('[yt-dlp version stderr]', err.toString()));
+  child.on('close', () => res.send(out.trim() || 'no output'));
+});
+
+// download endpoint
+app.get('/download', (req, res) => {
+  const url = req.query.url;
+  console.log('[DOWNLOAD] URL:', url);
+  if (!url) return res.status(400).send('Missing ?url=');
+
+  const format = req.query.format || 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4';
+  console.log('[DOWNLOAD] format:', format);
+
+  res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
+  const downloader = spawn(
+    '/usr/local/bin/yt-dlp',
+    ['-f', format, '-o', '-', url],
+    { stdio: ['ignore','pipe','pipe'] }
+  );
+
+  downloader.stdout.pipe(res);
+  downloader.stderr.on('data', data => console.error('[yt-dlp stderr]', data.toString()));
+  downloader.on('error', err => console.error('[yt-dlp spawn error]', err));
+  downloader.on('close', code => console.log('[yt-dlp exit code]', code));
+});
+
+// transcode endpoint
+app.post('/transcode', (req, res) => {
+  const { inputUrl, args = [] } = req.body;
+  console.log('[TRANSCODE] URL:', inputUrl, 'Args:', args);
+  if (!inputUrl) return res.status(400).send('Missing JSON { "inputUrl": "..." }');
+
+  res.setHeader('Content-Type', 'video/mp4');
+  const ff = spawn('ffmpeg', ['-i', inputUrl, ...args, '-f', 'mp4', 'pipe:1'], { stdio: ['ignore','pipe','pipe'] });
+  ff.stdout.pipe(res);
+  ff.stderr.on('data', d => console.error('[ffmpeg stderr]', d.toString()));
+  ff.on('error', e => console.error('[ffmpeg error]', e));
+  ff.on('close', code => console.log('[ffmpeg exit code]', code));
+});
+
+// start server
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`🚀 API listening on port ${port}`));
-
 
