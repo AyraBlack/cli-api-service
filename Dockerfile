@@ -29,6 +29,7 @@ RUN curl -L \
 RUN npm install --global puppeteer
 
 WORKDIR /usr/src/app
+
 # Bring your YouTube auth cookies into the container
 COPY cookies.txt ./
 
