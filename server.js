@@ -3,6 +3,10 @@ const express = require('express');
 const { spawn } = require('child_process');
 const app = express();
 
+// ADD THESE TWO LINES AT THE TOP
+const fs = require('fs');
+const path = require('path');
+
 const YTDLP_BIN = '/usr/local/bin/yt-dlp';
 
 app.use((req, res, next) => {
@@ -14,6 +18,32 @@ app.use(express.json());
 app.get('/health', (_req, res) => {
   res.status(200).send('OK');
 });
+
+// ++++++++++++++++ ADD THIS TEMPORARY ENDPOINT FOR THE SCREENSHOT ++++++++++++++++
+app.get('/get-debug-screenshot', (req, res) => {
+  // This assumes server.js and login_post_nav_error.png are in the same directory 
+  // (e.g., /usr/src/app) when the app runs in Coolify.
+  const filePath = path.join(__dirname, 'login_post_nav_error.png');
+  console.log('[DEBUG] Attempting to send screenshot from path:', filePath);
+
+  if (fs.existsSync(filePath)) {
+    // Send the file. The browser will then download it or display it.
+    res.sendFile(filePath, (err) => {
+      if (err) {
+        console.error('[DEBUG] Error sending screenshot:', err);
+        if (!res.headersSent) { // Check if headers were already sent
+          res.status(500).send('Error sending screenshot file.');
+        }
+      } else {
+        console.log('[DEBUG] Screenshot sent successfully.');
+      }
+    });
+  } else {
+    console.log('[DEBUG] Screenshot not found at path:', filePath);
+    res.status(404).send('Screenshot file not found. Make sure login.js has run and created it.');
+  }
+});
+// +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 app.get('/yt-dlp-version', (_req, res) => {
   const child = spawn(YTDLP_BIN, ['--version'], { stdio: ['ignore','pipe','pipe'] });
@@ -35,7 +65,7 @@ app.get('/download', (req, res) => {
   res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
 
   const args = [
-    '--cookies', '/usr/src/app/cookies.txt',  // ← MODIFIED: Use the absolute path to the cookies file
+    '--cookies', '/usr/src/app/cookies.txt', // Using absolute path
     '-f', format,
     '--add-header',
       'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
