@@ -1,7 +1,7 @@
 {
   "name": "cli-api-service",
   "version": "1.0.0",
-  "description": "HTTP API for yt-dlp, Puppeteer, FFmpeg, and YouTube via ytdl-core",
+  "description": "HTTP API for yt-dlp, Puppeteer, FFmpeg, and YouTube Transcripts",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -10,8 +10,10 @@
     "express": "^4.18.2",
     "puppeteer": "^23.11.0",
     "ytdl-core": "^4.11.1",
-    "puppeteer-extra": "^3.3.6", 
-    "puppeteer-extra-plugin-stealth": "^2.11.2"
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "archiver": "^7.0.1",
+    "youtube-transcript": "^1.1.1"
   },
   "engines": {
     "node": ">=18.0.0"
