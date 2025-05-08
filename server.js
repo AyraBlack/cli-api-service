@@ -30,7 +30,7 @@ app.get('/download', (req, res) => {
   console.log('[DOWNLOAD] URL:', url);
   if (!url) return res.status(400).send('Missing ?url=');
 
-  // fallback for direct file URLs
+  // ⬇️ fallback for direct media URLs
   if (/\.(mp4|m4a|mov|avi|mkv)(\?.*)?$/i.test(url)) {
     console.log('[DOWNLOAD] direct HTTP fetch for file:', url);
     const curlProc = spawn('curl', ['-L', url], { stdio: ['ignore','pipe','pipe'] });
@@ -41,6 +41,7 @@ app.get('/download', (req, res) => {
     return;
   }
 
+  // ⬇️ otherwise use yt-dlp for YouTube (and other) URLs
   const format = req.query.format || 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4';
   console.log('[DOWNLOAD] format:', format);
 
