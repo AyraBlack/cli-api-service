@@ -1,11 +1,10 @@
 const express = require('express');
 const { spawn } = require('child_process');
-const ytdl = require('ytdl-core');
 const path = require('path');
 const app = express();
 
 const YTDLP_BIN = '/usr/local/bin/yt-dlp';
-const COOKIES_FILE_PATH = '/usr/src/app/cookies.txt'; // baked-in cookies.txt
+const COOKIES_FILE_PATH = '/usr/src/app/cookies.txt';
 
 // log every request
 app.use((req, res, next) => {
@@ -28,59 +27,27 @@ app.get('/yt-dlp-version', (_req, res) => {
   child.on('close', () => res.send(out.trim() || 'no output'));
 });
 
-// download endpoint
-app.get('/download', async (req, res) => {
+// download endpoint (yt-dlp for ALL URLs)
+app.get('/download', (req, res) => {
   const url = req.query.url;
   console.log('[DOWNLOAD] URL:', url);
   if (!url) return res.status(400).send('Missing ?url=');
 
-  // 1) Raw-file fallback
-  if (/\.(mp4|m4a|mov|avi|mkv)(\?.*)?$/i.test(url)) {
-    console.log('[DOWNLOAD] direct HTTP fetch for file:', url);
-    const curlProc = spawn('curl', ['-L', url], { stdio: ['ignore','pipe','pipe'] });
-    curlProc.stdout.pipe(res);
-    curlProc.stderr.on('data', d => console.error('[curl stderr]', d.toString()));
-    return;
-  }
-
-  // 2) YouTube via ytdl-core with User-Agent override
-  if (ytdl.validateURL(url)) {
-    console.log('[DOWNLOAD] YouTube stream via ytdl-core');
-    res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
-    return ytdl(url, {
-      filter: f => f.container === 'mp4' && f.hasVideo && f.hasAudio,
-      quality: 'highestvideo',
-      requestOptions: {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-            + 'AppleWebKit/537.36 (KHTML, like Gecko) '
-            + 'Chrome/115.0.0.0 Safari/537.36'
-        }
-      }
-    })
-    .on('error', err => {
-      console.error('[ytdl-core error]', err);
-      if (!res.headersSent) res.status(500).send('YouTube download failed');
-    })
-    .pipe(res);
-  }
-
-  // 3) Other sites via yt-dlp with cookies + ffmpeg for QuickTime compatibility
-  console.log('[DOWNLOAD] fallback yt-dlp');
+  // yt-dlp always handles both raw and streaming sources
   const format = req.query.format || 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4';
   res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
 
   const args = [
+    '--cookies', COOKIES_FILE_PATH,
     '--add-header', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-    '--cookies', COOKIES_FILE_PATH,           // ← ensure cookies.txt is passed
     '-f', format,
     '--external-downloader', 'ffmpeg',
     '--external-downloader-args', '-c:v libx264 -c:a aac -movflags +faststart',
-    '-o', '-', // stream to stdout
+    '-o', '-',
     url
   ];
 
-  console.log(`[DOWNLOAD] Spawning yt-dlp with args: ${YTDLP_BIN} ${args.join(' ')}`);
+  console.log(`[DOWNLOAD] Spawning: ${YTDLP_BIN} ${args.join(' ')}`);
   const child = spawn(YTDLP_BIN, args, { stdio: ['ignore','pipe','pipe'] });
   child.stdout.pipe(res);
   child.stderr.on('data', d => console.error('[yt-dlp stderr]', d.toString()));
