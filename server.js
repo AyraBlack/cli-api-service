@@ -1,23 +1,26 @@
 // server.js
 const express = require('express');
 const { spawn } = require('child_process');
-const path = require('path');
 const app = express();
 
 const YTDLP_BIN = '/usr/local/bin/yt-dlp';
-// Puppeteer’s Chromium profile dir (from your Docker ENV)
+
+// where Puppeteer stored Chromium’s profile
 const CHROME_USER_DATA_DIR = process.env.CHROME_USER_DATA_DIR || '/home/node/chromium-profile';
 
+// log every request
 app.use((req, res, next) => {
   console.log('[REQ]', req.method, req.path);
   next();
 });
 app.use(express.json());
 
+// health-check endpoint
 app.get('/health', (_req, res) => {
   res.status(200).send('OK');
 });
 
+// expose yt-dlp version
 app.get('/yt-dlp-version', (_req, res) => {
   const child = spawn(YTDLP_BIN, ['--version'], { stdio: ['ignore','pipe','pipe'] });
   let out = '';
@@ -29,35 +32,21 @@ app.get('/yt-dlp-version', (_req, res) => {
   });
 });
 
+// download endpoint — everything via yt-dlp now
 app.get('/download', (req, res) => {
   const url = req.query.url;
   console.log('[DOWNLOAD] URL:', url);
   if (!url) return res.status(400).send('Missing ?url=');
 
-  // ─── RAW‐FILE FALLBACK ───────────────────────────────────────────────────────
-  if (/\.(mp4|m4a|mov|avi|mkv)(\?.*)?$/i.test(url)) {
-    console.log('[DOWNLOAD] direct HTTP fetch for file:', url);
-    // use the original filename (before any querystring) for Content‐Disposition
-    const fname = path.basename(url.split('?')[0]);
-    res.setHeader('Content-Disposition', `attachment; filename="${fname}"`);
-    const curl = spawn('curl', ['-L', url], { stdio: ['ignore','pipe','pipe'] });
-    curl.stdout.pipe(res);
-    curl.stderr.on('data', d => console.error('[curl stderr]', d.toString()));
-    curl.on('error', e => {
-      console.error('[curl error]', e);
-      if (!res.headersSent) res.status(500).send('curl failed');
-    });
-    return;
-  }
-
-  // ─── ALL ELSE → yt-dlp + ffmpeg ─────────────────────────────────────────────
+  // tell yt-dlp to pick the best MP4+M4A combo (or fallback itself)
   const format = req.query.format || 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4';
   res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
 
   const args = [
-    // pull your logged-in cookies from the Puppeteer Chromium profile
+    // pull logged-in cookies from our Puppeteer profile
     '--cookies-from-browser', `chromium:${CHROME_USER_DATA_DIR}`,
 
+    // spoof a modern Chrome UA
     '--add-header',
       'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
     + 'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
@@ -65,11 +54,11 @@ app.get('/download', (req, res) => {
     '-f', format,
     '--external-downloader', 'ffmpeg',
     '--external-downloader-args', '-c:v libx264 -c:a aac -movflags +faststart',
-    '-o','-',  // stream to stdout
+    '-o', '-',    // stream output to stdout
     url
   ];
 
-  console.log('[DOWNLOAD] Spawning:', YTDLP_BIN, args.join(' '));
+  console.log('[DOWNLOAD] Spawning yt-dlp:', YTDLP_BIN, args.join(' '));
   const child = spawn(YTDLP_BIN, args, { stdio: ['ignore','pipe','pipe'] });
 
   child.stdout.pipe(res);
@@ -88,5 +77,6 @@ app.get('/download', (req, res) => {
   });
 });
 
+// start server
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`🚀 API listening on port ${port}`));
