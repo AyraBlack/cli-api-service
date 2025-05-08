@@ -1,7 +1,7 @@
 {
   "name": "cli-api-service",
   "version": "1.0.0",
-  "description": "HTTP API for yt-dlp, Puppeteer, FFmpeg, and YouTube Transcripts",
+  "description": "HTTP API for yt-dlp, Puppeteer and FFmpeg using proxy",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -13,7 +13,6 @@
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "archiver": "^7.0.1",
-    "youtube-transcript": "^1.1.1"
   },
   "engines": {
     "node": ">=18.0.0"
