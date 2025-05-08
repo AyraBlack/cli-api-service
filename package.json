@@ -9,8 +9,7 @@
   "dependencies": {
     "express": "^4.18.2",
     "puppeteer": "^23.11.0",
-    "ytdl-core": "^4.11.1" 
-    // "otplib": "^12.0.1" <-- REMOVED THIS LINE
+    "ytdl-core": "^4.11.1"
   },
   "engines": {
     "node": ">=18.0.0"
