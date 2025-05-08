@@ -1,14 +1,14 @@
 {
   "name": "cli-api-service",
   "version": "1.0.0",
-  "description": "HTTP API for yt-dlp, Puppeteer, FFmpeg",
+  "description": "HTTP API for yt-dlp, Puppeteer, FFmpeg, and YouTube via ytdl-core",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "puppeteer": "^19.11.1"
+    "puppeteer": "^19.11.1",
+    "ytdl-core": "^4.11.1"
   }
 }
-
