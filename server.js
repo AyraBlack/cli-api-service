@@ -1,10 +1,13 @@
-// server.js - Proxy Method - Added Write Test, Simplified Download to Default Format
+// server.js - Proxy Method - Corrected Write Test & Default Download
+// - Fixes fssync require statement
+// - Added Write Test endpoint
+// - Simplified Download to Default Format
 
 const express = require('express');
 const { spawn } = require('child_process');
 const app = express();
-const fs = require('fs').promises; 
-const fssync = 'fs'; // Use sync fs for initial check and potentially write test
+const fs_promises = require('fs').promises; // Use promises for async operations later if needed
+const fs = require('fs'); // Use standard fs for sync operations like existsSync/mkdirSync
 const path = require('path');
 // Archiver not needed for these tests
 // const archiver = require('archiver'); 
@@ -14,14 +17,15 @@ const PROXY_URL = process.env.YTDLP_PROXY_URL;
 const TEST_WRITE_FILE = path.join(__dirname, 'version_test.txt'); // File for write test
 const DOWNLOAD_DIR = path.join(__dirname, 'downloads'); // Keep downloads separate
 
-// Ensure download directory exists
-if (!fssync.existsSync(DOWNLOAD_DIR)){
+// --- Startup: Ensure download directory exists ---
+// Use the correctly required 'fs' module here
+if (!fs.existsSync(DOWNLOAD_DIR)){
     console.log(`Creating download directory: ${DOWNLOAD_DIR}`);
     try {
-        fssync.mkdirSync(DOWNLOAD_DIR, { recursive: true });
+        fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
     } catch (mkdirErr) {
         console.error(`FATAL: Could not create download directory ${DOWNLOAD_DIR}:`, mkdirErr);
-        process.exit(1); 
+        process.exit(1); // Exit if we can't create the download dir
     }
 }
 
@@ -40,7 +44,7 @@ app.get('/health', (_req, res) => {
 app.get('/test-write', (_req, res) => {
   console.log('[WRITE TEST] Attempting to write yt-dlp version to file...');
   // Command: yt-dlp --version > /usr/src/app/version_test.txt
-  // We use spawn with shell=true to handle the redirection '>' easily
+  // Use spawn with shell=true to handle the redirection '>' easily
   try {
       const command = `${YTDLP_BIN} --version > ${TEST_WRITE_FILE}`;
       console.log(`[WRITE TEST] Running command: ${command}`);
@@ -68,14 +72,14 @@ app.get('/test-write', (_req, res) => {
           }
           // Check if file was created
           try {
-              await fs.access(TEST_WRITE_FILE);
-              const content = await fs.readFile(TEST_WRITE_FILE, 'utf8');
+              await fs_promises.access(TEST_WRITE_FILE); // Use promises version for async check
+              const content = await fs_promises.readFile(TEST_WRITE_FILE, 'utf8');
               console.log(`[WRITE TEST] Success! File ${TEST_WRITE_FILE} created with content: ${content.trim()}`);
                if (!res.headersSent) {
                   res.status(200).json({ success: true, message: `File created successfully. Content: ${content.trim()}` });
                }
                // Optionally delete the test file
-               // await fs.unlink(TEST_WRITE_FILE); 
+               // await fs_promises.unlink(TEST_WRITE_FILE); 
           } catch (fileErr) {
               console.error(`[WRITE TEST] Command exited successfully but file ${TEST_WRITE_FILE} not found or unreadable.`, fileErr);
                if (!res.headersSent) {
@@ -154,20 +158,23 @@ app.get('/download', (req, res) => {
       child.on('close', async (code) => { 
         console.log(`[yt-dlp exit code] ${code}`);
         
-        const intendedFilename = stdoutOutput.trim().split('\n').pop(); 
+        const intendedFilename = stdoutOutput.trim().split('\n').pop(); // Get last line of stdout
         console.log(`[DOWNLOAD] yt-dlp intended to save: ${intendedFilename || '???'}`);
 
         let filesInDir = [];
         let fileExists = false;
-        let actualFilePath = intendedFilename ? path.join(DOWNLOAD_DIR, path.basename(intendedFilename)) : null; // Use DOWNLOAD_DIR
+        // Construct the full path using DOWNLOAD_DIR and the base filename
+        let actualFilePath = intendedFilename ? path.join(DOWNLOAD_DIR, path.basename(intendedFilename)) : null; 
 
         try {
-            filesInDir = await fs.readdir(DOWNLOAD_DIR); // List downloads directory
+            filesInDir = await fs_promises.readdir(DOWNLOAD_DIR); // List downloads directory using promises fs
             console.log(`[DEBUG] Files found in ${DOWNLOAD_DIR} after yt-dlp exit: [${filesInDir.join(', ')}]`);
             if(actualFilePath) {
+               // Check if the base filename exists in the list
                fileExists = filesInDir.includes(path.basename(actualFilePath)); 
             }
         } catch (readErr) {
+            // Log error if reading directory fails, but continue to check exit code
             console.error(`[DEBUG] Error listing files in ${DOWNLOAD_DIR}:`, readErr);
         }
        
@@ -181,9 +188,11 @@ app.get('/download', (req, res) => {
                  }
             }
         } else {
+            // Exit code was 0, check if the file actually exists
             if (fileExists && actualFilePath) {
                 console.log(`[DOWNLOAD] Success! File ${actualFilePath} created.`);
                  if (!res.headersSent) { 
+                     // Send success JSON, file is on server
                      res.status(200).json({ success: true, message: `Download successful. File saved on server: ${actualFilePath}` });
                  }
             } else {
