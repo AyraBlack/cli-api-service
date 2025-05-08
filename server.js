@@ -1,6 +1,7 @@
-// server.js - Proxy Method - Simplest possible download test v2
+// server.js - Proxy Method - Force M4A download test
 // - Save to current dir with fixed name
 // - Print traffic size
+// - Added --force-overwrites, --no-cache-dir
 
 const express = require('express');
 const { spawn } = require('child_process');
@@ -8,11 +9,8 @@ const app = express();
 const fs = require('fs').promises; 
 const fssync = require('fs'); 
 const path = require('path');
-// Archiver not needed for this simple test
-// const archiver = require('archiver'); 
 
 const YTDLP_BIN = '/usr/local/bin/yt-dlp';
-// Saving directly to current directory for this test
 const PROXY_URL = process.env.YTDLP_PROXY_URL; 
 
 app.use((req, res, next) => {
@@ -55,11 +53,11 @@ app.get('/yt-dlp-version', (_req, res) => {
   }
 });
 
-// Simple Download Endpoint v2 - Just Best Audio, Save to current dir as test_audio.ext
+// Simple Download Endpoint v3 - Force M4A Audio, Save to current dir as test_audio.m4a
 app.get('/download', (req, res) => {
   const url = req.query.url;
 
-  console.log(`[SIMPLE DOWNLOAD TEST v2] Request received - URL: ${url}`);
+  console.log(`[SIMPLE DOWNLOAD TEST v3] Request received - URL: ${url}`);
   if (!url) { return res.status(400).send('Missing query parameter: url'); }
   try { new URL(url); } catch (e) { return res.status(400).send('Invalid URL format provided.'); }
   if (!PROXY_URL) {
@@ -68,22 +66,24 @@ app.get('/download', (req, res) => {
   }
   console.log('[DOWNLOAD] Using proxy configured via environment variable.');
 
-  // --- MODIFIED: Output to current directory with fixed name ---
+  // --- MODIFIED: Output to current directory with fixed name and M4A extension ---
   const outputTemplate = 'test_audio.%(ext)s'; // Save directly in /usr/src/app
-  const expectedFilename = 'test_audio.webm'; // Since format 251 is webm
+  const expectedFilename = 'test_audio.m4a'; // Expecting M4A now
 
   // --- MODIFIED ARGUMENTS ---
   const args = [
     '--proxy', PROXY_URL, 
-    '-f', 'bestaudio/best', // Select best audio format
-    // NO --extract-audio
+    // Force M4A format (typically ID 140)
+    '-f', 'bestaudio[ext=m4a]/bestaudio', 
+    // NO --extract-audio (let's just download the container)
     // NO --audio-format
     // NO --write-auto-subs
     '-o', outputTemplate, // Save directly with fixed name
     '--no-warnings', 
     // '--ignore-errors', // Still removed
-    // '--print', 'filename', // Removed
-    '--print', 'traffic', // ADDED: Print downloaded bytes
+    '--force-overwrites', // ADDED
+    '--no-cache-dir',     // ADDED
+    '--print', 'traffic', // Keep printing traffic
     '--verbose', // Keep verbose logging
     url
   ];
@@ -117,23 +117,19 @@ app.get('/download', (req, res) => {
       child.on('close', async (code) => { 
         console.log(`[yt-dlp exit code] ${code}`);
         
-        // Log the captured traffic size
-        const trafficLine = stdoutOutput.trim().split('\n').pop(); // Get last line (should be traffic)
+        const trafficLine = stdoutOutput.trim().split('\n').pop(); 
         console.log(`[DOWNLOAD] yt-dlp reported traffic: ${trafficLine || '???'}`);
 
-        // List directory contents AFTER yt-dlp finishes
         let filesInDir = [];
         let fileExists = false;
         try {
-            filesInDir = await fs.readdir(__dirname); // List current directory
+            filesInDir = await fs.readdir(__dirname); 
             console.log(`[DEBUG] Files found in ${__dirname} after yt-dlp exit: [${filesInDir.join(', ')}]`);
-            // Check specifically for the expected file
             fileExists = filesInDir.includes(expectedFilename); 
         } catch (readErr) {
             console.error(`[DEBUG] Error listing files in ${__dirname}:`, readErr);
         }
        
-        // Check exit code
         if (code !== 0) { 
             console.error(`[DOWNLOAD] yt-dlp failed for URL: ${url} (exit code ${code})`);
             if (!res.headersSent) { 
@@ -144,7 +140,6 @@ app.get('/download', (req, res) => {
                  }
             }
         } else {
-            // Exit code was 0, check if the file actually exists
             if (fileExists) {
                 console.log(`[DOWNLOAD] Success! File ${expectedFilename} created.`);
                  if (!res.headersSent) { 
@@ -153,7 +148,6 @@ app.get('/download', (req, res) => {
             } else {
                  console.error(`[DOWNLOAD] yt-dlp exited successfully but file not found: ${expectedFilename}`);
                  if (!res.headersSent) { 
-                     // Include traffic info in the error message
                      res.status(500).send(`yt-dlp exited successfully but the expected file was not found. Traffic: ${trafficLine || '???'}. Check logs. Stderr:\n${stderrOutput}`);
                  }
             }
