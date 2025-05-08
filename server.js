@@ -1,4 +1,5 @@
-// server.js
+// server.js - WITH temporary endpoint to download screenshots
+
 const express = require('express');
 const { spawn } = require('child_process');
 const app = express();
@@ -19,19 +20,19 @@ app.get('/health', (_req, res) => {
   res.status(200).send('OK');
 });
 
-// ++++++++++++++++ MODIFIED TEMPORARY ENDPOINT ++++++++++++++++
+// ++++++++++++++++ ADDING THIS TEMPORARY ENDPOINT BACK ++++++++++++++++
 app.get('/get-debug-screenshot', (req, res) => {
   const fileName = req.query.name; // Get filename from query parameter
   if (!fileName || !fileName.endsWith('.png')) {
     return res.status(400).send('Please provide a valid .png filename in the ?name= parameter.');
   }
 
-  // Assumes server.js is in /usr/src/app, so screenshots are in the same directory
+  // Assumes server.js is in /usr/src/app, same place screenshots are saved
   const filePath = path.join(__dirname, fileName); 
   console.log('[DEBUG] Attempting to send screenshot:', filePath);
 
   if (fs.existsSync(filePath)) {
-    res.sendFile(filePath, (err) => {
+    res.sendFile(filePath, (err) => { 
       if (err) {
         console.error('[DEBUG] Error sending screenshot:', err);
         if (!res.headersSent) {
@@ -46,10 +47,9 @@ app.get('/get-debug-screenshot', (req, res) => {
     res.status(404).send(`Screenshot file '${fileName}' not found.`);
   }
 });
-// +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+// ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 app.get('/yt-dlp-version', (_req, res) => {
-  // ... (your yt-dlp-version code) ...
   const child = spawn(YTDLP_BIN, ['--version'], { stdio: ['ignore','pipe','pipe'] });
   let out = '';
   child.stdout.on('data', c => out += c);
@@ -61,7 +61,6 @@ app.get('/yt-dlp-version', (_req, res) => {
 });
 
 app.get('/download', (req, res) => {
-  // ... (your download code) ...
   const url = req.query.url;
   console.log('[DOWNLOAD] URL:', url);
   if (!url) return res.status(400).send('Missing ?url=');
@@ -93,10 +92,3 @@ app.get('/download', (req, res) => {
   child.on('close', code => {
     console.log('[yt-dlp exit code]', code);
     if (code !== 0 && !res.headersSent) {
-      res.status(500).send(`yt-dlp exited with ${code}. Check logs.`);
-    }
-  });
-});
-
-const port = process.env.PORT || 3000;
-app.listen(port, () => console.log(`🚀 API listening on port ${port}`));
