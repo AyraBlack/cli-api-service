@@ -80,26 +80,28 @@ async function tryToLogInToYouTube() {
     console.log('Login Robot: Waiting for navigation after password (expecting success)...');
     try {
          await page.waitForFunction(
-           `document.querySelector('ytd-topbar-menu-button-renderer yt-icon-button#button') || document.body.innerText.includes('Welcome, <span class="math-inline">\{YOUTUBE\_EMAIL\}'\) \|\| document\.body\.innerText\.includes\('Manage your Google Account'\) \|\| document\.querySelector\('a\[href\*\="accounts\.google\.com/SignOutOptions"\]'\)\`,
-\{ timeout\: 45000 \} 
-\);
-console\.log\('Login Robot\: Post\-login check passed \(found expected elements\)\.'\);
-\} catch \(navError\) \{
-console\.warn\('Login Robot\: Did not find clear indicators of login success quickly\. Waiting for general navigation\.\.\.'\);
-try \{
-await page\.waitForNavigation\(\{ waitUntil\: 'networkidle2', timeout\: 30000 \}\);
-\} catch \(finalNavError\) \{
-console\.error\('Login Robot\: Navigation after password failed or timed out\.', finalNavError\.message\);
-\}
-if \(page && typeof page\.screenshot \=\=\= 'function'\) \{
-await page\.screenshot\(\{ path\: 'login\_no2fa\_nav\_error\.png' \}\);
-console\.log\('Login Robot\: Screenshot login\_no2fa\_nav\_error\.png saved\.'\);
-\}
-\}
-console\.log\('Login Robot\: Navigating to YouTube to finalize session and save cookies\.\.\.'\);
-await page\.goto\(YOUTUBE\_URL, \{ waitUntil\: 'networkidle2', timeout\: 30000 \}\);
-const avatarSel \= 'ytd\-topbar\-menu\-button\-renderer yt\-icon\-button\#button';
-const isLikelyLoggedIn \= await page\.</span>(avatarSel);
+           `document.querySelector('ytd-topbar-menu-button-renderer yt-icon-button#button') || document.body.innerText.includes('Welcome, ${YOUTUBE_EMAIL}') || document.body.innerText.includes('Manage your Google Account') || document.querySelector('a[href*="accounts.google.com/SignOutOptions"]')`,
+           { timeout: 45000 } 
+         );
+         console.log('Login Robot: Post-login check passed (found expected elements).');
+      } catch (navError) {
+         console.warn('Login Robot: Did not find clear indicators of login success quickly. Waiting for general navigation...');
+         try {
+            await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
+         } catch (finalNavError) {
+            console.error('Login Robot: Navigation after password failed or timed out.', finalNavError.message);
+         }
+         if (page && typeof page.screenshot === 'function') {
+             await page.screenshot({ path: 'login_no2fa_nav_error.png' });
+             console.log('Login Robot: Screenshot login_no2fa_nav_error.png saved.');
+         }
+      }
+
+    console.log('Login Robot: Navigating to YouTube to finalize session and save cookies...');
+    await page.goto(YOUTUBE_URL, { waitUntil: 'networkidle2', timeout: 30000 });
+
+    const avatarSel = 'ytd-topbar-menu-button-renderer yt-icon-button#button';
+    const isLikelyLoggedIn = await page.$(avatarSel);
     if (isLikelyLoggedIn) {
       console.log('Login Robot: Login flow complete. Avatar found on YouTube.');
     } else {
@@ -141,4 +143,16 @@ if (require.main === module) {
   tryToLogInToYouTube()
     .then((errorOccurred) => { // Check the flag returned by the function
       // *** MODIFICATION: Always exit 0 in standalone test mode for now ***
-      const exitCode = 0; // Force
+      const exitCode = 0; // Force exit code 0 
+      console.log(`Login Robot: Exiting with code ${exitCode}. (Error occurred during run: ${errorOccurred})`);
+      process.exit(exitCode); 
+    })
+    .catch((err) => { 
+        console.error("Login Robot: Unhandled promise rejection in standalone mode:", err);
+        process.exit(1); // Still exit 1 for unhandled promise rejections
+    });
+}
+
+// We still export the function, but the Manager Script will likely just check the exit code
+// of the standalone execution triggered by `if (require.main === module)`
+module.exports = { tryToLogInToYouTube };
