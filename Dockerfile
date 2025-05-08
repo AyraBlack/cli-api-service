@@ -1,16 +1,16 @@
-# Start with the same Node.js version
+# Start with Node.js 18 slim base image
 FROM node:18-slim
 
-# We'll do things as root initially for installations
+# Use root for installations
 USER root
 
-# --- Step 1: Prepare Your Docker "House" for a Smart Browser ---
+# --- Step 1: Set up Chromium profile for Puppeteer ---
+# Where Chromium stores its user data (cookies, cache, etc.)
+ENV CHROME_USER_DATA_DIR=/home/node/chromium-profile
 
-# Tell Chromium where to keep its memories (profile)
-ENV CHROME_USER_DATA_DIR /home/node/chromium-profile
-
-# Install system dependencies + Chromium
+# Install system dependencies, Chromium, ffmpeg, curl, etc.
 RUN apt-get update && apt-get install -y \
+    chromium \
     ffmpeg \
     curl \
     ca-certificates \
@@ -28,50 +28,39 @@ RUN apt-get update && apt-get install -y \
     libnss3 \
     lsb-release \
     xdg-utils \
-    chromium \
-    # Now, create the memory box room for Chromium and give keys to the 'node' user
-    && mkdir -p $CHROME_USER_DATA_DIR \
-    && chown -R node:node /home/node \
-    && chown -R node:node $CHROME_USER_DATA_DIR \
-    # Clean up apt lists to keep the image small
-    && rm -rf /var/lib/apt/lists/*
+  && mkdir -p "$CHROME_USER_DATA_DIR" \
+  && chown -R node:node /home/node "$CHROME_USER_DATA_DIR" \
+  && rm -rf /var/lib/apt/lists/*
 
-# Install yt-dlp
-RUN curl -L \
-    https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+# Install yt-dlp binary for media downloads
+RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
     -o /usr/local/bin/yt-dlp \
-    && chmod +x /usr/local/bin/yt-dlp
+  && chmod +x /usr/local/bin/yt-dlp
 
-# Install Puppeteer globally
+# Install Puppeteer globally so login.js can drive Chromium
 RUN npm install --global puppeteer
 
-# --- From now on, we'll work as the 'node' user for better security ---
+# Switch to unprivileged user for app runtime
 USER node
 
-# Set the main folder for our app inside the Docker house
+# Set work directory inside container
 WORKDIR /usr/src/app
 
-# We are NOT using the old cookies.txt file anymore
-# COMMENTED OUT: COPY cookies.txt ./
-
-# Copy package.json and package-lock.json first
+# Copy package manifests and install dependencies
 COPY --chown=node:node package.json package-lock.json* ./
+RUN npm install --production
 
-# Install only the necessary app dependencies
-RUN npm install --production # This will use your package.json
-
-# Copy the rest of your application code
+# Copy application source code and entrypoint manager script
 COPY --chown=node:node . .
 
-# Copy our new "manager" script (entrypoint.sh)
-COPY --chown=node:node entrypoint.sh .
-# Give the manager script permission to run
+# Make entrypoint script executable
 RUN chmod +x ./entrypoint.sh
-# Tell Docker that our manager script is the first thing to run
+
+# Define entrypoint to run the manager first
 ENTRYPOINT ["./entrypoint.sh"]
 
-# Your app will listen on port 3000
+# Expose application port
 EXPOSE 3000
 
-# This command will be given to our entrypoint.sh manager
+# Default command passed to entrypoint (starts server)
 CMD ["npm", "start"]
