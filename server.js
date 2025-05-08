@@ -3,6 +3,13 @@ const { spawn } = require('child_process');
 const app = express();
 app.use(express.json());
 
+// log every request to see what hits the server
+app.use((req, res, next) => {
+  console.log('[REQ]', req.method, req.path);
+  next();
+});
+
+
 // 1) Download with yt-dlp
 app.get('/download', (req, res) => {
   const YTDLP = '/usr/local/bin/yt-dlp'; // absolute path to yt-dlp
