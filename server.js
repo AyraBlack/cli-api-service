@@ -1,4 +1,4 @@
-// server.js - Proxy Method - Force Error on Download Fail, Verbose Logging
+// server.js - Proxy Method - Basic Video Download Test (Default Format)
 
 const express = require('express');
 const { spawn } = require('child_process');
@@ -6,7 +6,8 @@ const app = express();
 const fs = require('fs').promises; 
 const fssync = require('fs'); 
 const path = require('path');
-const archiver = require('archiver'); 
+// Archiver not needed for this test
+// const archiver = require('archiver'); 
 
 const YTDLP_BIN = '/usr/local/bin/yt-dlp';
 const DOWNLOAD_DIR = path.join(__dirname, 'downloads'); 
@@ -66,46 +67,42 @@ app.get('/yt-dlp-version', (_req, res) => {
   }
 });
 
-// Download Endpoint using Proxy and Zipping results
+// Basic Download Endpoint - Default best format (video+audio)
 app.get('/download', (req, res) => {
   const url = req.query.url;
-  const lang = req.query.lang || 'en'; 
-  const audioFormat = req.query.audioformat || 'mp3'; 
 
-  console.log(`[DOWNLOAD - VERBOSE/NO IGNORE ERRORS] Request received - URL: ${url}, Lang: ${lang}, AudioFormat: ${audioFormat}`);
-  if (!url) {
-    return res.status(400).send('Missing query parameter: url');
-  }
+  console.log(`[BASIC DOWNLOAD TEST] Request received - URL: ${url}`);
+  if (!url) { return res.status(400).send('Missing query parameter: url'); }
   try { new URL(url); } catch (e) { return res.status(400).send('Invalid URL format provided.'); }
-
+  
   if (!PROXY_URL) {
       console.error('[DOWNLOAD] FATAL ERROR: YTDLP_PROXY_URL environment variable is not set.');
       return res.status(500).send('Server configuration error: Proxy URL not set.');
   }
   console.log('[DOWNLOAD] Using proxy configured via environment variable.');
 
-
-  const outputTemplate = path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s');
+  const outputTemplate = path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'); 
   let videoId = ''; 
 
-  // --- MODIFIED ARGUMENTS ---
+  // --- VERY BASIC yt-dlp ARGUMENTS ---
   const args = [
     '--proxy', PROXY_URL, 
-    '-f', 'bestaudio/best', 
-    '--extract-audio', 
-    '--audio-format', audioFormat,
-    '--audio-quality', '0', 
-    '--write-auto-subs', 
-    '--sub-lang', lang, 
-    '-o', outputTemplate, 
-    // '--no-warnings', // REMOVED to see all warnings
-    // '--ignore-errors', // REMOVED to make errors fatal
-    '--print', 'id', 
-    '--print', 'traffic', // ADDED to see if data is downloaded
-    '--verbose', // ADDED for maximum detail
+    // NO -f (let yt-dlp choose default best video+audio format)
+    // NO --extract-audio
+    // NO --audio-format
+    // NO --write-auto-subs
+    '-o', outputTemplate, // Save directly to downloads dir
+    // NO --no-warnings
+    // NO --ignore-errors
+    '--force-overwrites', 
+    '--no-cache-dir',     
+    '--print', 'id',        // Print video ID
+    '--print', 'filename',  // Print the final filename it saves
+    '--print', 'traffic',   // Print downloaded bytes
+    '--verbose',            // Maximum debug output
     url
   ];
-  // --- END MODIFIED ARGUMENTS ---
+  // --- END BASIC ARGUMENTS ---
 
   let safeArgsLog = args.map(arg => arg.includes('@') && arg.includes(':') ? '--proxy ***HIDDEN***' : arg);
   console.log('[DOWNLOAD] Spawning:', YTDLP_BIN, safeArgsLog.join(' '));
@@ -113,11 +110,12 @@ app.get('/download', (req, res) => {
   try {
       const child = spawn(YTDLP_BIN, args, { stdio: ['ignore','pipe','pipe'] }); 
 
-      let stderrOutput = '';
-      let stdoutOutput = ''; 
-      child.stdout.on('data', (data) => { 
+      let stderrOutput = ''; 
+      let stdoutOutput = ''; // Capture ID, filename, and traffic
+
+      child.stdout.on('data', (data) => {
           const dataStr = data.toString().trim();
-          console.log(`[yt-dlp stdout] ${dataStr}`); // Log all stdout
+          console.log(`[yt-dlp stdout] ${dataStr}`); 
           stdoutOutput += dataStr + '\n'; 
       });
       child.stderr.on('data', (data) => {
@@ -128,21 +126,20 @@ app.get('/download', (req, res) => {
 
       child.on('error', (err) => { 
           console.error('[yt-dlp spawn error]', err);
-          if (!res.headersSent) {
-            res.status(500).send(`Failed to start yt-dlp process: ${err.message}`);
-          }
+          if (!res.headersSent) { res.status(500).send(`Failed to start yt-dlp process: ${err.message}`); }
       });
 
       child.on('close', async (code) => { 
         console.log(`[yt-dlp exit code] ${code}`);
         
-        // Extract info from stdout (last line should be traffic, second last ID)
+        // Extract info from stdout
         const stdoutLines = stdoutOutput.trim().split('\n');
         const trafficLine = stdoutLines.pop() || 'NA'; 
+        const intendedFilenameFull = stdoutLines.pop() || ''; 
         videoId = stdoutLines.pop() || ''; 
         
         if (!videoId) {
-            try {
+             try {
                  const urlObj = new URL(url);
                  if (urlObj.hostname.includes('youtube.com') || urlObj.hostname.includes('youtu.be')) {
                      videoId = urlObj.searchParams.get('v') || urlObj.pathname.split('/').pop();
@@ -153,79 +150,49 @@ app.get('/download', (req, res) => {
         } else {
             console.log(`[DOWNLOAD] Determined Video ID: ${videoId}`);
         }
+        console.log(`[DOWNLOAD] yt-dlp intended to save as: ${intendedFilenameFull || '???'}`);
         console.log(`[DOWNLOAD] yt-dlp reported traffic: ${trafficLine}`);
 
         // List directory contents AFTER yt-dlp finishes
         let filesInDir = [];
+        let fileExists = false;
+        let actualFilePath = intendedFilenameFull ? path.join(DOWNLOAD_DIR, path.basename(intendedFilenameFull)) : null;
+
         try {
             filesInDir = await fs.readdir(DOWNLOAD_DIR); 
             console.log(`[DEBUG] Files found in ${DOWNLOAD_DIR} after yt-dlp exit: [${filesInDir.join(', ')}]`);
+            if(actualFilePath) {
+               fileExists = filesInDir.includes(path.basename(actualFilePath)); 
+            }
         } catch (readErr) {
             console.error(`[DEBUG] Error listing files in ${DOWNLOAD_DIR}:`, readErr);
         }
        
-        // NOW, a non-zero exit code IS an error
+        // Check exit code - non-zero IS an error
         if (code !== 0) { 
-            if (stderrOutput.includes('proxy') || stderrOutput.includes('Unsupported proxy type') || stderrOutput.includes('timed out')) {
-                 console.error(`[DOWNLOAD] Proxy error detected for URL: ${url} (exit code ${code})`);
-                 if (!res.headersSent) {
+            console.error(`[DOWNLOAD] yt-dlp failed for URL: ${url} (exit code ${code})`);
+            if (!res.headersSent) { 
+                 if (stderrOutput.includes('proxy') || stderrOutput.includes('Unsupported proxy type') || stderrOutput.includes('timed out')) {
                      res.status(502).send(`Proxy error occurred.\n\nStderr:\n${stderrOutput}`);
+                 } else {
+                     res.status(500).send(`yt-dlp process exited with error code ${code}.\n\nStderr:\n${stderrOutput}`); 
+                 }
+            }
+        } else {
+            // Exit code was 0, check if the file actually exists
+            if (fileExists && actualFilePath) {
+                console.log(`[DOWNLOAD] Success! File ${actualFilePath} created.`);
+                 if (!res.headersSent) { 
+                     res.status(200).json({ success: true, message: `Download successful. File saved on server: ${actualFilePath}` });
                  }
             } else {
-                console.error(`[DOWNLOAD] yt-dlp failed for URL: ${url} (exit code ${code})`);
-                if (!res.headersSent) {
-                     res.status(500).send(`yt-dlp process exited with error code ${code}.\n\nStderr:\n${stderrOutput}`);
-                }
-            }
-            return; 
-        }
-        
-        // --- If yt-dlp finished with exit code 0, proceed to ZIP ---
-        console.log(`[DOWNLOAD] yt-dlp finished successfully for ${videoId}. Preparing ZIP file.`);
-        
-        const expectedAudioFilename = `${videoId}.${audioFormat}`;
-        const expectedSubsFilename = `${videoId}.${lang}.vtt`; 
-        const audioFilePath = path.join(DOWNLOAD_DIR, expectedAudioFilename);
-        const subsFilePath = path.join(DOWNLOAD_DIR, expectedSubsFilename);
-        const zipFilename = `${videoId}_${lang}_${audioFormat}.zip`;
-
-        try {
-            const filesToZip = [];
-            try {
-                await fs.access(audioFilePath);
-                filesToZip.push({ path: audioFilePath, name: expectedAudioFilename });
-                console.log(`[ZIP] Found audio file: ${expectedAudioFilename}`);
-            } catch (audioErr) { console.warn(`[ZIP] Audio file not found: ${expectedAudioFilename}`); }
-            try {
-                await fs.access(subsFilePath);
-                filesToZip.push({ path: subsFilePath, name: expectedSubsFilename });
-                 console.log(`[ZIP] Found subtitle file: ${expectedSubsFilename}`);
-            } catch (subsErr) { console.warn(`[ZIP] Subtitle file not found: ${expectedSubsFilename}`); }
-
-            if (filesToZip.length === 0) {
-                console.error('[ZIP] No files found to zip even though yt-dlp exited successfully!');
-                if (!res.headersSent) { res.status(404).send(`Neither audio nor subtitle file was successfully created for video ${videoId}. Check server logs and yt-dlp stderr:\n${stderrOutput}`); }
-                return;
-            }
-
-            console.log(`[ZIP] Creating archive: ${zipFilename} with ${filesToZip.length} file(s).`);
-            res.setHeader('Content-Disposition', `attachment; filename="${zipFilename}"`);
-            res.setHeader('Content-Type', 'application/zip');
-            const archive = archiver('zip', { zlib: { level: 9 } }); 
-            archive.on('warning', (err) => { if (err.code !== 'ENOENT') { console.error('[ZIP Error]', err); if (!res.headersSent) { res.status(500).send(`Error creating zip file: ${err.message}`); } } });
-            archive.on('error', (err) => { console.error('[ZIP Fatal Error]', err); if (!res.headersSent) { res.status(500).send(`Fatal error creating zip file: ${err.message}`); } });
-            archive.pipe(res); 
-            for (const file of filesToZip) { archive.file(file.path, { name: file.name }); }
-            await archive.finalize(); 
-            console.log(`[ZIP] Archive finalized and sent: ${zipFilename}`);
-
-        } catch (zipError) { 
-            console.error('[ZIP] General error during zipping process:', zipError);
-            if (!res.headersSent) {
-                res.status(500).send(`Error during file zipping: ${zipError.message}`);
+                 console.error(`[DOWNLOAD] yt-dlp exited successfully (code 0) but file not found: ${actualFilePath || 'intended filename unknown'}`);
+                 if (!res.headersSent) { 
+                     res.status(500).send(`yt-dlp exited successfully but the expected file was not found. Traffic: ${trafficLine}. Check logs. Stderr:\n${stderrOutput}`);
+                 }
             }
         }
-      }); 
+      }); // End of child.on('close')
 
   } catch (e) { 
        console.error('[DOWNLOAD] Critical error before spawning yt-dlp:', e);
@@ -233,7 +200,8 @@ app.get('/download', (req, res) => {
             res.status(500).send(`Server error before running download: ${e.message}`);
        }
   }
-}); 
+}); // End of app.get('/download')
 
+// --- Start the Server ---
 const port = process.env.PORT || 3000; // Railway will set PORT
 app.listen(port, () => console.log(`🚀 API listening on port ${port}`));
