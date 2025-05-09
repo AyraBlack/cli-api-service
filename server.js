@@ -1,17 +1,27 @@
 // server.js - Stream Best Audio Directly to Client via Proxy
+// Includes root / and /health endpoints for platform health checks
 
 const express = require('express');
 const { spawn } = require('child_process');
 const app = express();
-const path = require('path'); // path is still useful
+const path = require('path'); 
 
-// fs and archiver are not needed for this direct streaming test
+// fs and archiver are not strictly needed for this direct streaming test
 // const fs = require('fs').promises; 
-// const fssync = require('fs'); 
+const fssync = require('fs'); // For initial directory check if needed
 // const archiver = require('archiver'); 
 
 const YTDLP_BIN = '/usr/local/bin/yt-dlp';
 const PROXY_URL = process.env.YTDLP_PROXY_URL; 
+
+// Minimal download directory creation, though not used in this direct stream
+const DOWNLOAD_DIR = path.join(__dirname, 'downloads'); 
+if (!fssync.existsSync(DOWNLOAD_DIR)){
+    console.log(`Creating download directory: ${DOWNLOAD_DIR}`);
+    try { fssync.mkdirSync(DOWNLOAD_DIR, { recursive: true }); }
+    catch (mkdirErr) { console.error(`Error creating download directory ${DOWNLOAD_DIR}:`, mkdirErr); }
+}
+
 
 app.use((req, res, next) => {
   console.log(`[REQ] ${req.method} ${req.path} Query: ${JSON.stringify(req.query)}`);
@@ -19,9 +29,11 @@ app.use((req, res, next) => {
 });
 app.use(express.json()); 
 
+// --- ADDED ROOT ENDPOINT for Railway health checks ---
 app.get('/', (_req, res) => {
   res.status(200).send('API Server is running. Use /health or /stream-audio endpoints.');
 });
+// --- END ADDED ROOT ENDPOINT ---
 
 app.get('/health', (_req, res) => {
   res.status(200).send('OK');
@@ -59,8 +71,7 @@ app.get('/yt-dlp-version', (_req, res) => {
 // Endpoint to Stream Audio Directly
 app.get('/stream-audio', (req, res) => {
   const url = req.query.url;
-  // Suggest an extension based on common bestaudio formats, client can override filename
-  const suggestedExt = req.query.format || 'webm'; // .webm (opus) or .m4a are common for bestaudio
+  const suggestedExt = req.query.format || 'webm'; 
 
   console.log(`[STREAM AUDIO] Request received - URL: ${url}`);
   if (!url) { 
@@ -78,20 +89,17 @@ app.get('/stream-audio', (req, res) => {
   }
   console.log('[STREAM AUDIO] Using proxy configured via environment variable.');
 
-  // --- ARGUMENTS FOR STREAMING BEST AUDIO ---
   const args = [
     '--proxy', PROXY_URL, 
-    '-f', 'bestaudio/best', // Select best audio format, download as is
-    // NO --extract-audio or --audio-format, stream raw container
-    '-o', '-', // Output to STDOUT
+    '-f', 'bestaudio/best', 
+    '-o', '-', 
     // '--no-warnings', // Let's see warnings for this test
     // '--ignore-errors', // REMOVED - let errors propagate
     '--force-overwrites', 
     '--no-cache-dir',     
-    '--verbose', // Keep verbose logging for now
+    '--verbose', 
     url
   ];
-  // --- END ARGUMENTS ---
 
   let safeArgsLog = args.map(arg => arg.includes('@') && arg.includes(':') ? '--proxy ***HIDDEN***' : arg);
   console.log('[STREAM AUDIO] Spawning:', YTDLP_BIN, safeArgsLog.join(' '));
@@ -99,17 +107,14 @@ app.get('/stream-audio', (req, res) => {
   try {
       const child = spawn(YTDLP_BIN, args, { stdio: ['ignore','pipe','pipe'] }); 
 
-      // Set headers for streaming audio
-      // The actual extension will be whatever yt-dlp's bestaudio is (e.g. .webm, .m4a)
-      let contentType = 'application/octet-stream'; // Generic fallback
+      let contentType = 'application/octet-stream'; 
       if (suggestedExt === 'webm') contentType = 'audio/webm';
       else if (suggestedExt === 'm4a') contentType = 'audio/mp4';
-      else if (suggestedExt === 'mp3') contentType = 'audio/mpeg'; // If you were converting
+      else if (suggestedExt === 'mp3') contentType = 'audio/mpeg'; 
 
       res.setHeader('Content-Type', contentType);
       res.setHeader('Content-Disposition', `attachment; filename="downloaded_audio.${suggestedExt}"`); 
 
-      // Pipe yt-dlp's stdout (the audio data) directly to the HTTP response
       child.stdout.pipe(res);
 
       let stderrOutput = ''; 
@@ -136,14 +141,11 @@ app.get('/stream-audio', (req, res) => {
                      res.status(500).send(`yt-dlp stream process exited with error code ${code}.\n\nStderr:\n${stderrOutput}`); 
                  }
             } else {
-                // If headers were sent, the stream might have started then failed.
-                // We can't send another status code, but we should end the response.
                 console.log('[STREAM AUDIO] yt-dlp exited with error after stream started. Ending response.');
                 res.end();
             }
         } else {
             console.log(`[STREAM AUDIO] yt-dlp stream finished successfully for URL: ${url}. Response should have ended.`);
-            // res.end() is called implicitly when the piped stdout stream ends.
         }
       }); 
 
@@ -155,6 +157,5 @@ app.get('/stream-audio', (req, res) => {
   }
 }); 
 
-// --- Start the Server ---
 const port = process.env.PORT || 3000; 
 app.listen(port, () => console.log(`🚀 API listening on port ${port}`));
